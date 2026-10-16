@@ -11,6 +11,7 @@ import { performance } from 'node:perf_hooks';
 import fg from 'fast-glob';
 import { fdir } from 'fdir';
 import { glob as tinyglob } from 'tinyglobby';
+import { glob as nodeGlob } from 'glob';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -103,6 +104,10 @@ async function main() {
       ['hyperglob entries + stats', () => hyperglobSync('src/**/*.ts', { cwd: root }).length],
       ['fast-glob (entries + stats)', async () => (await fg('src/**/*.ts', { cwd: root, stats: true })).length],
     ]);
+    await race([
+      ['glob (node-glob, async paths)', async () => (await nodeGlob('src/**/*.ts', { cwd: root })).length],
+      ['hyperglob pathsOnly (repeat, interleaved)', () => hyperglobSync('src/**/*.ts', { cwd: root, pathsOnly: true }).length],
+    ]);
     await bench('tinyglobby (paths)', async () => (await tinyglob('src/**/*.ts', { cwd: root })).length);
     await bench('fdir (paths)', async () => new fdir().glob('**/*.ts').withRelativePaths().crawl(path.join(root, 'src')).withPromise().then((r) => r.length));
 
@@ -126,6 +131,7 @@ async function main() {
       ['fast-glob + manual ignore list', async () => (await fg('**/*.ts', { cwd: root, ignore: ['**/dist/**', '**/*.log'] })).length],
     ]);
     await bench('hyperglob entries + stats (native gitignore)', () => hyperglobSync('**/*.ts', { cwd: root }).length);
+    await bench('glob + manual ignore list', async () => (await nodeGlob('**/*.ts', { cwd: root, ignore: ['**/dist/**', '**/*.log'] })).length);
 
     console.log('\n— Scenario 4: streaming API collect (ergonomics check, not a race) —');
     await bench('hyperglob stream collect', async () => (await hyperglob('src/**/*.ts', { cwd: root }).collect()).length);
