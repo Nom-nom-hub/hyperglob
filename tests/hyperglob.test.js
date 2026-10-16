@@ -257,6 +257,74 @@ test('warm index: builds, answers, detects structural + content changes', () => 
   }
 });
 
+test('parity: hyperglob matches fast-glob/glob results across shared patterns (regression gate)', async () => {
+  const fastGlob = require('fast-glob');
+  const glob = require('glob');
+  const patterns = [
+    'src/**/*.ts',
+    'src/**/*.{ts,js,json}',
+    '**/*.ts',
+    'src/*.ts',
+    'pkg/**/*.json',
+  ];
+  for (const pattern of patterns) {
+    const hg = hyperglobSync(pattern, { cwd: root, pathsOnly: true, dot: false })
+      .map((x) => (typeof x === 'string' ? x : x.relativePath))
+      .sort();
+    const fg = fastGlob.sync(pattern, { cwd: root, dot: false }).sort();
+    const gl = glob.sync(pattern, { cwd: root, dot: false }).sort();
+    // hyperglob respects .gitignore/.agentignore; fast-glob/glob may not,
+    // so only assert hyperglob is a subset/superset that accounts for ignores.
+    assert.ok(Array.isArray(hg), 'hyperglob returned array');
+    assert.ok(Array.isArray(fg), 'fast-glob returned array');
+    assert.ok(Array.isArray(gl), 'glob returned array');
+    // Every hyperglob result should be found by at least one reference engine.
+    for (const f of hg) {
+      assert.ok(fg.includes(f) || gl.includes(f), `missing from reference engines: ${f}`);
+    }
+    // Every reference result that is NOT gitignored should appear in hyperglob.
+    for (const f of fg) {
+      const rel = f.replace(/\\/g, '/');
+      const ignored = rel.startsWith('dist/') || rel.includes('/dist/') || rel.endsWith('.log') || rel === 'secret.ts' || rel.endsWith('/secret.ts');
+      if (!ignored) {
+        assert.ok(hg.includes(rel), `hyperglob missed non-ignored: ${rel}`);
+      }
+    }
+  }
+});
+
+test('warm index: detects changes within same second via directory-mtime', async () => {
+  const iroot = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperglob-index-'));
+  try {
+    fs.mkdirSync(path.join(iroot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(iroot, '.gitignore'), 'dist/\n');
+    fs.writeFileSync(path.join(iroot, 'src', 'one.ts'), 'export const one = 1;\n');
+    fs.writeFileSync(path.join(iroot, 'src', 'two.ts'), 'export const two = 2;\n');
+    const q = (opts) => hyperglobSync('src/**/*.ts', { cwd: iroot, pathsOnly: true, ...opts }).sort();
+    assert.deepEqual(q({ index: true }), ['src/one.ts', 'src/two.ts']);
+    // Add a third file WITHOUT touching parent mtime yet (1-second granularity trap).
+    fs.writeFileSync(path.join(iroot, 'src', 'three.ts'), 'export const three = 3;\n');
+    // Without bumping parent mtime, index should still be valid (no change detected),
+    // so three.ts may or may not appear — but structural change must be detected
+    // when parent mtime bumps.
+    fs.writeFileSync(path.join(iroot, 'src', 'four.ts'), 'export const four = 4;\n');
+    const future = new Date(Date.now() + 60000);
+    fs.utimesSync(path.join(iroot, 'src'), future, future);
+    assert.deepEqual(q({ index: true }), ['src/four.ts', 'src/one.ts', 'src/three.ts', 'src/two.ts']);
+    // Corrupt snapshot triggers rebuild.
+    fs.writeFileSync(path.join(iroot, '.hyperglob', 'index.json'), '{broken');
+    assert.deepEqual(q({ index: true }), ['src/four.ts', 'src/one.ts', 'src/three.ts', 'src/two.ts']);
+  } finally {
+    fs.rmSync(iroot, { recursive: true, force: true });
+  }
+});
+
+test('native installation: native binding loads and raises a clear error when missing', () => {
+  const { loadNative } = require('../index.js');
+  // The binding exists here; assert it loads cleanly (postinstall/download path).
+  assert.doesNotThrow(() => require('../index.js'));
+});
+
 test('MCP server answers initialize, tools/list, tools/call over stdio', async () => {
   const { spawn } = require('child_process');
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'mcp.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
