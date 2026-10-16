@@ -19,6 +19,10 @@ npm install @blazeinstall/hyperglob   # postinstall fetches the prebuilt .node f
 
 Prebuilt binaries for Linux/macOS/Windows are attached to each GitHub release (`v*` tags) and downloaded automatically on `npm install`.<|end|>
 
+## For agents
+
+hyperglob is built for agentic workflows: one pass to discover, filter, and inspect files — no separate `glob` + `readFile` + parse passes. Agents use it to find the exact files to edit (`:exports`, `:imports`, `:contains`), check blast radius (`hyperglobDependents`), and respect `.gitignore` automatically. Exposed as MCP tools (`hyperglob_query`, `hyperglob_paths`, `hyperglob_dependents`) so any MCP-speaking agent can use it with zero code.
+
 ## API
 
 ### Streaming (async iterable, also awaitable)
