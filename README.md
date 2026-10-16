@@ -183,21 +183,6 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 | `pathsOnly` | `false` | Return path strings (fast path). |
 | `index` | `false` | Use the warm index snapshot at `<cwd>/.hyperglob/` (sync APIs; see Warm index). |
 
-## Roadmap (from the PRD)
-
-- [x] Phase 1: Rust core — parallel traversal (`ignore` + fan-out), glob engine (GlobSet)
-- [x] Phase 2: N-API bindings — `hyperglob` / `hyperglobSync`, pull-based AsyncIterable streaming
-- [x] Phase 3: Selector parser — `:contains`, `:matches`, `:exports`, `:has-key`, `:size`, `:modified`; memchr byte search in Rust
-- [x] Phase 4: Benchmark suite — fast-glob / fdir / tinyglobby comparisons (`npm run bench`)
-- [x] Full AST parsing via `oxc_parser` (v0.3.0: `:exports` and `:imports` are AST-exact for JS/TS; regex signature fallback remains for other file types)
-- [x] MCP server (v0.3.0: `mcp.js` / `hyperglob-mcp` bin — any MCP-speaking agent can query without Node bindings)
-- [x] Warm index (v0.4.0: `.hyperglob/` snapshot with directory-mtime validation; repeat queries answer in memory)
-- [x] Import graph (v0.4.0: `hyperglobDependents` — transitive importers across relative, index-file, and bare monorepo specifiers)
-- [x] Proof suite (v0.4.0: `bench/parity.mjs` result-parity vs fast-glob on seeded random trees — it caught a real maxDepth semantics divergence; `bench/real-repo.mjs` on real checkouts; `bench/check-regression.mjs` perf gate)
-- [ ] True zero-copy buffers for `content` (currently Rust-allocated, streamed in batches; content strings are copied once across the boundary)
-- [ ] Prebuilt binaries for Linux/macOS/Windows (napi-rs CI matrix) — blocked locally on GitHub `workflow` token scope
-- [x] Plain-path performance pass (v0.2.0: custom rayon traversal + columnar transport — hyperglob now wins the plain-glob rows too, see Benchmarks)
-
 ## Development
 
 ```bash
