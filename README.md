@@ -12,12 +12,12 @@ src/**/*.ts :contains("export const") :modified(>2026-10-01) :size(<100kb)
 
 ## Install
 
-```bash
-npm install hyperglob   # (source build: cargo + Node 18+)
-npm run build           # compiles the Rust core and stages the .node addon
+```
+npm install @blazeinstall/hyperglob   # postinstall fetches the prebuilt .node for your platform
+# (source build still available: npm run build  — cargo + Node 18+)
 ```
 
-Prebuilt binaries are a roadmap item; current releases build from source with a stable Rust toolchain.
+Prebuilt binaries for Linux/macOS/Windows are attached to each GitHub release (`v*` tags) and downloaded automatically on `npm install`.<|end|>
 
 ## API
 

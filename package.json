@@ -26,7 +26,6 @@
     "index.d.ts",
     "cli.js",
     "mcp.js",
-    "*.node",
     "scripts/install.js"
   ],
   "keywords": [
@@ -41,10 +40,10 @@
   "license": "MIT",
   "main": "index.js",
   "module": "index.mjs",
-  "name": "hyperglob",
+  "name": "@blazeinstall/hyperglob",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Nom-nom-hub/hyperglob.git"
+    "url": "git+https://github.com/Nom-nom-hub/hyperglob.git"
   },
   "scripts": {
     "bench": "node bench/run.mjs",
@@ -58,5 +57,5 @@
     "postinstall": "node scripts/install.js"
   },
   "types": "index.d.ts",
-  "version": "0.4.0"
+  "version": "0.4.2"
 }
