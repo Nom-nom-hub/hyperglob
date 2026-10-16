@@ -1,6 +1,6 @@
 [package]
 name = "hyperglob"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A multi-threaded, AST-aware, zero-copy file discovery engine designed to replace legacy globbing for AI agents, monorepos, and high-performance developer tooling."
 license = "MIT"
@@ -15,6 +15,10 @@ napi = { version = "2", default-features = false, features = ["napi8"] }
 napi-derive = "2"
 ignore = "0.4"
 globset = "0.4"
+oxc_allocator = "0.154"
+oxc_ast = "0.154"
+oxc_parser = "0.154"
+oxc_span = "0.154"
 memchr = "2"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

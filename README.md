@@ -78,12 +78,23 @@ npx hyperglob 'src/**/*.ts :exports("useServerHook")' --json
 | --- | --- |
 | `src/**/*.ts` | Standard fast multi-threaded glob. |
 | `src/**/*.ts :contains("export const")` | Only files whose content contains the literal (evaluated in Rust during the crawl). `:contains(/regex/)` and `:matches("regex")` run a regex byte search. |
-| `src/**/*.ts :exports("useServerHook")` | Light AST inspection: a real `export const/let/var/function/class/interface/type/enum` signature (or `export { ... }` list) for that name — a string literal containing the text does **not** match. |
+| `src/**/*.ts :exports("useServerHook")` | **Full AST check** (oxc parser): the module really exports that name — any form: declarations, `export { a as b }`, re-exports, default exports. Export-shaped text inside comments or string literals does **not** match. |
+| `src/**/*.ts :imports("react")` | AST check: the module imports from `react` (exact source or a subpath like `react/jsx-runtime`); `require()` and dynamic `import()` calls count too. |
 | `src/**/*.json :has-key("dependencies.react")` | Evaluates JSON structure in-flight during traversal (dotted path, array indices work). |
 | `src/**/* :size(<100kb)` | Files smaller than 100KB, filtered at the OS stat step. Ops: `< <= > >= =`; units `b kb mb gb kib mib gib`. |
 | `src/**/* :modified(>2026-10-01)` | Filters on filesystem mtime (UTC). Accepts `YYYY-MM-DD` and full ISO datetimes. |
 
 Selectors compose with AND semantics and stack with plain patterns and `!` negations in the same query or across an array of queries.
+
+## MCP server (for agents)
+
+`mcp.js` exposes hyperglob as an MCP tool server over stdio — any MCP-speaking agent (Claude, Cursor, Cline, custom runtimes) can run discovery queries without Node bindings:
+
+```json
+{ "mcpServers": { "hyperglob": { "command": "node", "args": ["/path/to/hyperglob/mcp.js"] } } }
+```
+
+Tools: `hyperglob_query` (full entries as JSON) and `hyperglob_paths` (paths-only fast path). Both take `pattern` (with selectors), optional `cwd` and `maxDepth`; `hyperglob_query` also accepts `content: true`.
 
 ## Ignore stack
 
@@ -165,7 +176,8 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 - [x] Phase 2: N-API bindings — `hyperglob` / `hyperglobSync`, pull-based AsyncIterable streaming
 - [x] Phase 3: Selector parser — `:contains`, `:matches`, `:exports`, `:has-key`, `:size`, `:modified`; memchr byte search in Rust
 - [x] Phase 4: Benchmark suite — fast-glob / fdir / tinyglobby comparisons (`npm run bench`)
-- [ ] Full AST parsing via `oxc_parser` (`:exports` is currently a light signature inspection, not a full parse)
+- [x] Full AST parsing via `oxc_parser` (v0.3.0: `:exports` and `:imports` are AST-exact for JS/TS; regex signature fallback remains for other file types)
+- [x] MCP server (v0.3.0: `mcp.js` / `hyperglob-mcp` bin — any MCP-speaking agent can query without Node bindings)
 - [ ] True zero-copy buffers for `content` (currently Rust-allocated, streamed in batches; content strings are copied once across the boundary)
 - [ ] Prebuilt binaries for Linux/macOS/Windows (napi-rs CI matrix) — blocked locally on GitHub `workflow` token scope
 - [x] Plain-path performance pass (v0.2.0: custom rayon traversal + columnar transport — hyperglob now wins the plain-glob rows too, see Benchmarks)
@@ -174,7 +186,7 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 
 ```bash
 npm run build     # cargo build --release + stage .node
-npm test          # Rust unit tests are run via `cargo test`; npm test runs the Node suite (20 tests)
+npm test          # Rust unit tests are run via `cargo test` (9 tests); npm test runs the Node suite (23 tests)
 cargo test        # selector parser unit tests
 npm run example   # the PRD's §4/§5 examples, live
 npm run bench     # benchmark suite

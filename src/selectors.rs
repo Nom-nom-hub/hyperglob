@@ -7,12 +7,15 @@
 //!   :contains("literal")      byte substring search (memchr::memmem)
 //!   :contains(/regex/)        regex byte search
 //!   :matches("regex")         regex byte search
-//!   :exports(name)            export-signature check (light AST inspection)
+//!   :exports(name)            full AST export check (oxc_parser) for JS/TS files,
+//!                             regex signature fallback for other/unparseable files
+//!   :imports(name)            AST import check (also matches subpaths: name/*)
 //!   :has-key("a.b.c")         dotted JSON key path exists
 //!   :size(<100kb)             metadata filter, ops < <= > >= = ; units b/kb/mb/gb/kib/mib/gib
 //!   :modified(>2026-10-01)    metadata filter on mtime (UTC), ops as above
 
 use regex::bytes::Regex;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CmpOp {
@@ -49,6 +52,7 @@ pub enum Selector {
     ContainsLiteral(Vec<u8>),
     ContainsRegex(Regex),
     Exports(String, Regex),
+    Imports(String, Regex),
     HasKey(Vec<String>),
     Size(CmpOp, u64),
     Modified(CmpOp, i64), // epoch milliseconds (UTC)
@@ -61,18 +65,37 @@ impl Selector {
             Selector::ContainsLiteral(_)
                 | Selector::ContainsRegex(_)
                 | Selector::Exports(..)
+                | Selector::Imports(..)
                 | Selector::HasKey(_)
         )
     }
 
-    /// Evaluate a content selector against raw file bytes.
+    /// Evaluate a content selector against raw file bytes (assumes a `.ts`
+    /// source type for AST selectors; the engine passes the real extension).
     pub fn eval_content(&self, bytes: &[u8]) -> bool {
+        self.eval_content_ext(bytes, "ts")
+    }
+
+    /// Evaluate a content selector, using `ext` (no dot) to pick the AST
+    /// language for :exports/:imports. When the file parses as JS/TS the AST
+    /// is authoritative (comments and strings cannot false-positive); the
+    /// bundled regex is only a fallback for other or unparseable files.
+    pub fn eval_content_ext(&self, bytes: &[u8], ext: &str) -> bool {
         match self {
             Selector::ContainsLiteral(needle) => {
                 !needle.is_empty() && memchr::memmem::find(bytes, needle).is_some()
             }
             Selector::ContainsRegex(re) => re.is_match(bytes),
-            Selector::Exports(_, re) => re.is_match(bytes),
+            Selector::Exports(name, re) => match ast_module_info(bytes, ext) {
+                Some((exports, _)) => exports.contains(name),
+                None => re.is_match(bytes),
+            },
+            Selector::Imports(name, re) => match ast_module_info(bytes, ext) {
+                Some((_, imports)) => imports
+                    .iter()
+                    .any(|src| src == name || src.starts_with(&format!("{name}/"))),
+                None => re.is_match(bytes),
+            },
             Selector::HasKey(path) => eval_has_key(bytes, path),
             _ => true,
         }
@@ -110,6 +133,133 @@ fn eval_has_key(bytes: &[u8], path: &[String]) -> bool {
         }
     }
     true
+}
+
+/// Parse a JS/TS module with oxc and collect (exported names, import
+/// sources). Exported names include "default" for default exports and the
+/// declared names behind `export default function foo() {}` / re-export
+/// specifiers (`export { a as b }` exports `b`). Returns None when the
+/// extension is not JS/TS, the bytes are not UTF-8, or parsing reports
+/// errors — callers then fall back to regex signatures.
+pub fn ast_module_info(bytes: &[u8], ext: &str) -> Option<(HashSet<String>, HashSet<String>)> {
+    use oxc_ast::ast::*;
+    let dummy = format!("file.{ext}");
+    let source_type = oxc_span::SourceType::from_path(std::path::Path::new(&dummy)).ok()?;
+    let text = std::str::from_utf8(bytes).ok()?;
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, text, source_type).parse();
+    if !parsed.diagnostics.is_empty() {
+        return None;
+    }
+
+    fn exported_name(name: &ModuleExportName) -> String {
+        match name {
+            ModuleExportName::IdentifierName(id) => id.name.as_str().to_string(),
+            ModuleExportName::IdentifierReference(id) => id.name.as_str().to_string(),
+            ModuleExportName::StringLiteral(lit) => lit.value.as_str().to_string(),
+        }
+    }
+
+    fn decl_names(decl: &Declaration, out: &mut HashSet<String>) {
+        match decl {
+            Declaration::FunctionDeclaration(f) => {
+                if let Some(id) = &f.id {
+                    out.insert(id.name.as_str().to_string());
+                }
+            }
+            Declaration::ClassDeclaration(c) => {
+                if let Some(id) = &c.id {
+                    out.insert(id.name.as_str().to_string());
+                }
+            }
+            Declaration::VariableDeclaration(v) => {
+                for declarator in &v.declarations {
+                    for id in declarator.id.get_binding_identifiers() {
+                        out.insert(id.name.as_str().to_string());
+                    }
+                }
+            }
+            Declaration::TSInterfaceDeclaration(i) => {
+                out.insert(i.id.name.as_str().to_string());
+            }
+            Declaration::TSTypeAliasDeclaration(t) => {
+                out.insert(t.id.name.as_str().to_string());
+            }
+            Declaration::TSEnumDeclaration(e) => {
+                out.insert(e.id.name.as_str().to_string());
+            }
+            Declaration::TSImportEqualsDeclaration(ie) => {
+                out.insert(ie.id.name.as_str().to_string());
+            }
+            Declaration::TSNamespaceDeclaration(ns) => {
+                out.insert(ns.id.name.as_str().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let mut exports: HashSet<String> = HashSet::new();
+    let mut imports: HashSet<String> = HashSet::new();
+    for stmt in &parsed.program.body {
+        match stmt {
+            Statement::ImportDeclaration(decl) => {
+                imports.insert(decl.source.value.as_str().to_string());
+            }
+            Statement::ExportDeclaration(decl) => {
+                decl_names(&decl.declaration, &mut exports);
+            }
+            Statement::ExportNamedDeclaration(decl) => {
+                for spec in &decl.specifiers {
+                    exports.insert(exported_name(&spec.exported));
+                }
+            }
+            Statement::ExportFromDeclaration(decl) => {
+                for spec in &decl.specifiers {
+                    exports.insert(exported_name(&spec.exported));
+                }
+            }
+            Statement::ExportDefaultDeclaration(decl) => {
+                exports.insert("default".to_string());
+                match &decl.declaration {
+                    ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
+                        if let Some(id) = &f.id {
+                            exports.insert(id.name.as_str().to_string());
+                        }
+                    }
+                    ExportDefaultDeclarationKind::ClassDeclaration(c) => {
+                        if let Some(id) = &c.id {
+                            exports.insert(id.name.as_str().to_string());
+                        }
+                    }
+                    ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
+                        exports.insert(i.id.name.as_str().to_string());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    // Import declarations are AST nodes; require()/dynamic import() calls are
+    // expressions, so merge them in with a targeted scan. (Compiled once —
+    // a per-file Regex::new here cost ~200us x N files and dominated the
+    // whole AST path.)
+    static CALL_RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r#"(?:require|import)\(\s*['"]([^'"]+)['"]"#).unwrap());
+    for cap in CALL_RE.captures_iter(bytes) {
+        if let Some(m) = cap.get(1) {
+            imports.insert(String::from_utf8_lossy(m.as_bytes()).into_owned());
+        }
+    }
+    Some((exports, imports))
+}
+
+fn build_imports_regex(name: &str) -> Result<Regex, String> {
+    let esc = regex::escape(name);
+    let pat = format!(
+        r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]{esc}(?:/[^'"]*)?['"]"#
+    );
+    Regex::new(&pat).map_err(|e| e.to_string())
 }
 
 /// Split a query string into whitespace-separated tokens that are not
@@ -316,6 +466,11 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
             let re = build_exports_regex(&arg)?;
             Ok(Selector::Exports(arg, re))
         }
+        "imports" | "import" => {
+            let (arg, _) = unquote(arg_raw);
+            let re = build_imports_regex(&arg)?;
+            Ok(Selector::Imports(arg, re))
+        }
         "has-key" | "haskey" | "hasKey" => {
             let (arg, _) = unquote(arg_raw);
             let path: Vec<String> = arg.split('.').map(|s| s.to_string()).collect();
@@ -438,6 +593,36 @@ mod tests {
         assert!(sel.eval_content(b"const x = 1;\nexport { useServerHook };\n"));
         assert!(!sel.eval_content(b"const useServerHook = () => {}"));
         assert!(!sel.eval_content(b"export const useServerHookExtra = 1"));
+    }
+
+    #[test]
+    fn exports_ast_no_false_positives() {
+        // The v0.1/v0.2 regex matched export-shaped text inside comments and
+        // strings; the AST must not.
+        let q = parse_query(r#"src/**/*.ts :exports("ghost")"#).unwrap();
+        let sel = &q.selectors[0];
+        assert!(!sel.eval_content(b"// export const ghost = 1;\nconst x = 1;\n"));
+        assert!(!sel.eval_content(b"const s = \"export const ghost = 1\";\n"));
+        assert!(!sel.eval_content(b"/* export function ghost() {} */\n"));
+        // Real forms the regex missed or handled fragilely:
+        assert!(sel.eval_content(b"const g = 1;\nexport { g as ghost };\n"));
+        assert!(sel.eval_content(b"export { g as ghost } from './impl';\n"));
+        assert!(sel.eval_content(b"export default function ghost() {}\n"));
+        let qd = parse_query(r#"src/**/*.ts :exports("default")"#).unwrap();
+        assert!(qd.selectors[0].eval_content(b"export default function ghost() {}\n"));
+        assert!(qd.selectors[0].eval_content(b"const g = 1;\nexport default g;\n"));
+    }
+
+    #[test]
+    fn imports_detection() {
+        let q = parse_query(r#"src/**/*.ts :imports("react")"#).unwrap();
+        let sel = &q.selectors[0];
+        assert!(sel.eval_content(b"import { useState } from 'react';\n"));
+        assert!(sel.eval_content(b"import 'react/jsx-runtime';\n"));
+        assert!(sel.eval_content(b"const r = require('react');\n"));
+        assert!(!sel.eval_content(b"import { x } from 'preact';\n"));
+        assert!(!sel.eval_content(b"// import { x } from 'react';\nconst y = 1;\n"));
+        assert!(!sel.eval_content(b"const s = \"from 'react'\";\n"));
     }
 
     #[test]

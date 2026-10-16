@@ -53,7 +53,7 @@ test.after(() => {
 const rels = (entries) => entries.map((e) => e.relativePath).sort();
 
 test('version is exposed', () => {
-  assert.equal(version(), '0.2.0');
+  assert.equal(version(), '0.3.0');
 });
 
 test('parseQuery parses PRD syntax', () => {
@@ -181,4 +181,77 @@ test('pathsOnly returns relative path strings', () => {
 
 test('unknown selector errors loudly', () => {
   assert.throws(() => hyperglobSync('src/**/*.ts :bogus(1)', { cwd: root }), /unknown selector/);
+});
+
+test(':exports is a real AST check (aliases, re-exports, defaults; no comment/string traps)', () => {
+  write('src/ast/comment-trap.ts', '// export const phantomHook = 1;\nconst real = 1;\n', NEW);
+  write('src/ast/alias.ts', 'const impl = () => 2;\nexport { impl as phantomHook };\n', NEW);
+  write('src/ast/reexport.ts', 'export { impl as phantomHook } from "./alias";\n', NEW);
+  write('src/ast/def.ts', 'export default function phantomHook() {}\n', NEW);
+  const out = rels(hyperglobSync('src/ast/*.ts :exports("phantomHook")', { cwd: root }));
+  assert.deepEqual(out, ['src/ast/alias.ts', 'src/ast/def.ts', 'src/ast/reexport.ts']);
+  const def = rels(hyperglobSync('src/ast/*.ts :exports("default")', { cwd: root }));
+  assert.deepEqual(def, ['src/ast/def.ts']);
+});
+
+test(':imports matches import declarations, subpaths, and require()', () => {
+  write('src/imp/a.ts', "import { useState } from 'react';\nexport const a = useState;\n", NEW);
+  write('src/imp/b.ts', "import 'react/jsx-runtime';\n", NEW);
+  write('src/imp/c.ts', "const p = require('react');\nmodule.exports = p;\n", NEW);
+  write('src/imp/d.ts', "import { x } from 'preact';\nexport const d = x;\n", NEW);
+  write('src/imp/e.ts', "// import { y } from 'react';\nconst e = 1;\n", NEW);
+  const out = rels(hyperglobSync('src/imp/*.ts :imports("react")', { cwd: root }));
+  assert.deepEqual(out, ['src/imp/a.ts', 'src/imp/b.ts', 'src/imp/c.ts']);
+});
+
+test('MCP server answers initialize, tools/list, tools/call over stdio', async () => {
+  const { spawn } = require('child_process');
+  const proc = spawn(process.execPath, [path.join(__dirname, '..', 'mcp.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const byId = new Map();
+  const waiters = new Map();
+  let buf = '';
+  proc.stdout.on('data', (chunk) => {
+    buf += chunk.toString();
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      byId.set(msg.id, msg);
+      if (waiters.has(msg.id)) {
+        waiters.get(msg.id)(msg);
+        waiters.delete(msg.id);
+      }
+    }
+  });
+  const call = (id, method, params) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`MCP timeout waiting for ${method}`)), 15000);
+      waiters.set(id, (m) => {
+        clearTimeout(timer);
+        resolve(m);
+      });
+      proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+  try {
+    const init = await call(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+    assert.equal(init.result.serverInfo.name, 'hyperglob');
+    const list = await call(2, 'tools/list', {});
+    assert.deepEqual(list.result.tools.map((t) => t.name).sort(), ['hyperglob_paths', 'hyperglob_query']);
+    const res = await call(3, 'tools/call', {
+      name: 'hyperglob_paths',
+      arguments: { pattern: 'src/**/*.ts :exports("useServerHook")', cwd: root },
+    });
+    const text = res.result.content[0].text;
+    assert.ok(text.includes('src/index.ts'));
+    assert.ok(text.includes('src/app.test.ts'));
+    const q = await call(4, 'tools/call', {
+      name: 'hyperglob_query',
+      arguments: { pattern: 'src/**/*.ts :imports("react")', cwd: root },
+    });
+    assert.ok(!q.result.isError);
+  } finally {
+    proc.kill();
+  }
 });

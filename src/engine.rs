@@ -362,8 +362,13 @@ impl Engine {
         let mut content: Option<String> = None;
         if is_file && (self.needs_content || self.options.with_content) {
             let bytes = std::fs::read(path).ok()?;
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_string();
             for sel in &self.query.selectors {
-                if sel.needs_content() && !sel.eval_content(&bytes) {
+                if sel.needs_content() && !sel.eval_content_ext(&bytes, &ext) {
                     return None;
                 }
             }
