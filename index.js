@@ -20,14 +20,22 @@ function loadNative() {
     path.join(__dirname, 'native', file),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return require(candidate);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).size > 0) return require(candidate);
   }
   throw new Error(
     `hyperglob: native binding not found (${file}). Run \`npm run build\` to compile the Rust core.`
   );
 }
 
-const native = loadNative();
+let native;
+try {
+  native = loadNative();
+} catch (e) {
+  try {
+    require('child_process').execFileSync(process.execPath, [require('path').join(__dirname, 'scripts', 'install.js')], { stdio: 'inherit' });
+  } catch {}
+  native = loadNative();
+}
 
 function toPatterns(patterns) {
   if (typeof patterns === 'string') return [patterns];
