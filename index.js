@@ -303,5 +303,7 @@ module.exports = {
   parseQuery,
   version: () => native.version(),
   native,
+  loadNative,
+  nativeFilename,
 };
 module.exports.default = hyperglob;

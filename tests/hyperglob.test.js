@@ -325,6 +325,89 @@ test('native installation: native binding loads and raises a clear error when mi
   assert.doesNotThrow(() => require('../index.js'));
 });
 
+test('native installation: missing or empty .node throws a clear, actionable error', () => {
+  const { loadNative, nativeFilename } = require('../index.js');
+  const pkgDir = path.join(__dirname, '..');
+  const nodePath = path.join(pkgDir, nativeFilename());
+  const backup = nodePath + '.bak';
+  try {
+    // Rename the real binary so loadNative finds nothing usable.
+    if (fs.existsSync(nodePath)) fs.renameSync(nodePath, backup);
+    // Empty file must not be treated as valid either.
+    fs.writeFileSync(nodePath, '');
+    assert.throws(() => loadNative(), /native binding not found/);
+  } finally {
+    try { fs.unlinkSync(nodePath); } catch {}
+    if (fs.existsSync(backup)) fs.renameSync(backup, nodePath);
+  }
+});
+
+test('native installation: unsupported platform raises a clear error', () => {
+  const { loadNative } = require('../index.js');
+  const origPlatform = process.platform;
+  const origArch = process.arch;
+  try {
+    Object.defineProperty(process, 'platform', { value: 'freebsd', configurable: true });
+    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+    assert.throws(() => loadNative(), /unsupported platform/);
+  } finally {
+    Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+    Object.defineProperty(process, 'arch', { value: origArch, configurable: true });
+  }
+});
+
+test('native installation: binary present loads without attempting download', () => {
+  const { loadNative } = require('../index.js');
+  assert.doesNotThrow(() => loadNative());
+  assert.ok(loadNative());
+});
+
+test('real-repository validation: representative monorepo with ignored files, nested packages, large tree', () => {
+  const iroot = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperglob-real-'));
+  try {
+    // Build a representative monorepo.
+    fs.mkdirSync(path.join(iroot, 'packages', 'a', 'src'), { recursive: true });
+    fs.mkdirSync(path.join(iroot, 'packages', 'b', 'src'), { recursive: true });
+    fs.mkdirSync(path.join(iroot, 'packages', 'c', 'src'), { recursive: true });
+    fs.mkdirSync(path.join(iroot, 'packages', 'a', 'node_modules', 'dep'), { recursive: true });
+    fs.mkdirSync(path.join(iroot, 'packages', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(iroot, '.gitignore'), 'node_modules/\ndist/\n*.log\n');
+    fs.writeFileSync(path.join(iroot, 'packages', 'a', 'package.json'), JSON.stringify({ name: 'a', version: '1.0.0' }), NEW);
+    fs.writeFileSync(path.join(iroot, 'packages', 'b', 'package.json'), JSON.stringify({ name: 'b', version: '1.0.0' }), NEW);
+    fs.writeFileSync(path.join(iroot, 'packages', 'c', 'package.json'), JSON.stringify({ name: 'c', version: '1.0.0' }), NEW);
+    fs.writeFileSync(path.join(iroot, 'packages', 'a', 'node_modules', 'dep', 'index.js'), 'module.exports = 1;\n', NEW);
+    fs.writeFileSync(path.join(iroot, 'packages', 'dist', 'bundle.js'), 'console.log("built");\n', NEW);
+    fs.writeFileSync(path.join(iroot, 'ignored.log'), 'should be ignored\n', NEW);
+
+    // ~2000 source files across nested packages.
+    for (let i = 0; i < 2000; i++) {
+      const pkg = ['a', 'b', 'c'][i % 3];
+      fs.writeFileSync(path.join(iroot, 'packages', pkg, 'src', `file${i}.ts`), `export const v${i} = ${i};\n`, NEW);
+    }
+
+    const q = (opts) => hyperglobSync('packages/**/src/**/*.ts', { cwd: iroot, pathsOnly: true, ...opts }).sort();
+
+    // Cold scan: builds answer from scratch.
+    const cold = q({ index: false });
+    assert.equal(cold.length, 2000, 'cold scan should find all 2000 source files');
+    assert.ok(cold.every((f) => !f.includes('node_modules') && !f.includes('/dist/')), 'cold scan excludes ignored dirs');
+
+    // Warm scan: same answer via index.
+    const warm = q({ index: true });
+    assert.deepEqual(warm, cold, 'warm index matches cold scan exactly');
+
+    // Content selector still exact on warm index.
+    const withExportV500 = hyperglobSync('packages/**/src/**/*.ts :contains("v500")', { cwd: iroot, pathsOnly: true, index: true });
+    assert.deepEqual(withExportV500, ['packages/c/src/file500.ts'], 'content selector exact on warm index');
+
+    // Ignored files never leak in.
+    assert.ok(!cold.some((f) => f.includes('node_modules')), 'no node_modules leaked');
+    assert.ok(!cold.some((f) => f.includes('/dist/')), 'no dist leaked');
+  } finally {
+    fs.rmSync(iroot, { recursive: true, force: true });
+  }
+});
+
 test('MCP server answers initialize, tools/list, tools/call over stdio', async () => {
   const { spawn } = require('child_process');
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'mcp.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -374,5 +457,98 @@ test('MCP server answers initialize, tools/list, tools/call over stdio', async (
     assert.ok(!q.result.isError);
   } finally {
     proc.kill();
+  }
+});
+
+test('MCP multi-agent: repeated initialize and concurrent queries', async () => {
+  const { spawn } = require('child_process');
+  const proc = spawn(process.execPath, [path.join(__dirname, '..', 'mcp.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const byId = new Map();
+  const waiters = new Map();
+  let buf = '';
+  proc.stdout.on('data', (chunk) => {
+    buf += chunk.toString();
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      byId.set(msg.id, msg);
+      if (waiters.has(msg.id)) {
+        waiters.get(msg.id)(msg);
+        waiters.delete(msg.id);
+      }
+    }
+  });
+  const call = (id, method, params) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`MCP timeout waiting for ${method}`)), 15000);
+      waiters.set(id, (m) => {
+        clearTimeout(timer);
+        resolve(m);
+      });
+      proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+  try {
+    // Repeated initialization is idempotent.
+    const init1 = await call(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'a', version: '1' } });
+    const init2 = await call(2, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'b', version: '2' } });
+    assert.equal(init1.result.serverInfo.name, 'hyperglob');
+    assert.equal(init2.result.serverInfo.name, 'hyperglob');
+    const list1 = await call(3, 'tools/list', {});
+    const list2 = await call(4, 'tools/list', {});
+    assert.deepEqual(list1.result.tools.map((t) => t.name).sort(), list2.result.tools.map((t) => t.name).sort());
+
+    // Concurrent content queries all return correct, independent results.
+    const results = await Promise.all([
+      call(5, 'tools/call', { name: 'hyperglob_paths', arguments: { pattern: 'src/**/*.ts :contains("export const")', cwd: root } }),
+      call(6, 'tools/call', { name: 'hyperglob_paths', arguments: { pattern: 'src/**/*.ts :contains("useServerHook")', cwd: root } }),
+      call(7, 'tools/call', { name: 'hyperglob_paths', arguments: { pattern: 'pkg/**/*.json', cwd: root } }),
+    ]);
+    for (const r of results) {
+      assert.ok(!r.result.isError, `concurrent call errored: ${JSON.stringify(r.result)}`);
+    }
+    const exportConst = results[0].result.content[0].text.split('\n').filter(Boolean).sort();
+    const useServerHook = results[1].result.content[0].text.split('\n').filter(Boolean).sort();
+    assert.ok(exportConst.includes('src/index.ts') && exportConst.includes('src/app.test.ts'));
+    assert.ok(useServerHook.includes('src/index.ts') && useServerHook.includes('src/app.test.ts'));
+    const jsonCount = results[2].result.content[0].text.split('\n').filter(Boolean).length;
+    assert.equal(jsonCount, 2);
+  } finally {
+    proc.kill();
+  }
+});
+
+test('MCP registration: writing the same entry twice does not duplicate', () => {
+  const iroot = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperglob-mcp-'));
+  try {
+    const cfgPath = path.join(iroot, 'settings.json');
+    const stdioEntry = { command: 'node', args: ['/abs/path/to/mcp.js'] };
+    function register(cfg) {
+      cfg.mcpServers = cfg.mcpServers || {};
+      if (cfg.mcpServers.hyperglob) return false;
+      cfg.mcpServers.hyperglob = stdioEntry;
+      return true;
+    }
+    function readJson(p) {
+      if (!fs.existsSync(p)) return null;
+      try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+    }
+    function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + '\n'); }
+    // First registration adds the entry.
+    let cfg = readJson(cfgPath) || {};
+    if (register(cfg)) writeJson(cfgPath, cfg);
+    // Second registration is a no-op (entry already present).
+    cfg = readJson(cfgPath);
+    const changed = register(cfg);
+    assert.equal(changed, false, 're-registration should not report a change');
+    writeJson(cfgPath, cfg);
+    const final = readJson(cfgPath);
+    const entries = Object.keys(final.mcpServers || {});
+    assert.equal(entries.length, 1, 'exactly one hyperglob entry after duplicate registration');
+    assert.equal(entries[0], 'hyperglob');
+  } finally {
+    fs.rmSync(iroot, { recursive: true, force: true });
   }
 });
