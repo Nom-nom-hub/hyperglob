@@ -27,3 +27,50 @@ https.get(url, (res) => {
   res.pipe(f);
   res.on('end', ()=>{ f.close(); console.log('hyperglob: binary installed.'); });
 }).on('error', (e) => { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: download failed, run `npm run build` (cargo): ' + e.message); process.exit(0); });
+
+const os = require('os');
+const home = os.homedir();
+
+function tryRegister(configPath, mutate) {
+  try {
+    if (!fs.existsSync(configPath)) return;
+    const raw = fs.readFileSync(configPath, 'utf8');
+    let json;
+    try { json = JSON.parse(raw); } catch { return; }
+    const changed = mutate(json);
+    if (changed) {
+      fs.writeFileSync(configPath, JSON.stringify(json, null, 2) + '\n');
+      console.log('hyperglob: registered MCP in ' + configPath);
+    }
+  } catch (e) { /* best effort */ }
+}
+
+const mcpEntry = { type: 'local', command: ['node', path.join(__dirname, '..', 'mcp.js')], enabled: true };
+
+tryRegister(path.join(home, '.config', 'kilo', 'kilo.jsonc'), (cfg) => {
+  cfg.mcp = cfg.mcp || {};
+  if (cfg.mcp.hyperglob) return false;
+  cfg.mcp.hyperglob = mcpEntry;
+  return true;
+});
+
+tryRegister(path.join(process.cwd(), '.cursor', 'mcp.json'), (cfg) => {
+  cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers.hyperglob) return false;
+  cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
+  return true;
+});
+
+tryRegister(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'), (cfg) => {
+  cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers.hyperglob) return false;
+  cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
+  return true;
+});
+
+tryRegister(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), (cfg) => {
+  cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers.hyperglob) return false;
+  cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
+  return true;
+});
