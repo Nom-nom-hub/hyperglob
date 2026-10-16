@@ -1,0 +1,29 @@
+[package]
+name = "hyperglob"
+version = "0.1.0"
+edition = "2021"
+description = "A multi-threaded, AST-aware, zero-copy file discovery engine designed to replace legacy globbing for AI agents, monorepos, and high-performance developer tooling."
+license = "MIT"
+repository = "https://github.com/Nom-nom-hub/hyperglob"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "hyperglob"
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+ignore = "0.4"
+globset = "0.4"
+memchr = "2"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
