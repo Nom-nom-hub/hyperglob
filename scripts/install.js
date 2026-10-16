@@ -27,7 +27,7 @@ if (!fs.existsSync(dest)) {
       https.get(res.headers.location, (r2) => { r2.pipe(f); r2.on('end', ()=>{ f.close(); console.log('hyperglob: binary installed.'); }); }).on('error', e=>{ try{fs.unlinkSync(dest);}catch{} console.warn('hyperglob: download failed: ' + e.message); process.exit(0); });
       return;
     }
-    if (res.statusCode !== 200) { console.warn('hyperglob: no prebuilt binary on releases; run npm run build (cargo). status=' + res.statusCode); process.exit(0); }
+    if (res.statusCode !== 200) { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: no prebuilt binary on releases; run npm run build (cargo). status=' + res.statusCode); process.exit(0); }
     res.pipe(f);
     res.on('end', ()=>{ f.close(); console.log('hyperglob: binary installed.'); });
   }).on('error', (e) => { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: download failed: ' + e.message); process.exit(0); });
