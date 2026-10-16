@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { hyperglob, hyperglobSync, parseQuery, version } = require('../index.js');
+const { hyperglob, hyperglobSync, hyperglobDependents, parseQuery, version } = require('../index.js');
 
 let root;
 
@@ -53,7 +53,7 @@ test.after(() => {
 const rels = (entries) => entries.map((e) => e.relativePath).sort();
 
 test('version is exposed', () => {
-  assert.equal(version(), '0.3.0');
+  assert.equal(version(), '0.4.0');
 });
 
 test('parseQuery parses PRD syntax', () => {
@@ -126,9 +126,16 @@ test('negation patterns + sync batch API (PRD §5.2)', () => {
 });
 
 test('maxDepth limits traversal (PRD §5.2)', () => {
-  const out = rels(hyperglobSync('src/**/*.ts', { cwd: root, maxDepth: 2 }));
-  assert.ok(out.includes('src/index.ts'));
-  assert.ok(!out.includes('src/deep/nested.ts'));
+  // Depth is counted from the pattern's static base (fast-glob `deep`
+  // semantics): src/index.ts is 1 below src/, src/deep/nested.ts is 2.
+  // (Before v0.4.0 hyperglob counted from cwd and diverged from fast-glob;
+  // bench/parity.mjs caught it.)
+  const out2 = rels(hyperglobSync('src/**/*.ts', { cwd: root, maxDepth: 2 }));
+  assert.ok(out2.includes('src/index.ts'));
+  assert.ok(out2.includes('src/deep/nested.ts'));
+  const out1 = rels(hyperglobSync('src/**/*.ts', { cwd: root, maxDepth: 1 }));
+  assert.ok(out1.includes('src/index.ts'));
+  assert.ok(!out1.includes('src/deep/nested.ts'));
 });
 
 test('stats are populated by default', () => {
@@ -204,6 +211,52 @@ test(':imports matches import declarations, subpaths, and require()', () => {
   assert.deepEqual(out, ['src/imp/a.ts', 'src/imp/b.ts', 'src/imp/c.ts']);
 });
 
+test('hyperglobDependents returns direct + transitive importers', () => {
+  write('graph/c.ts', 'export const c = 1;\n', NEW);
+  write('graph/b.ts', "import { c } from './c';\nexport const b = c;\n", NEW);
+  write('graph/a.ts', "import { b } from './b.js';\nexport const a = b;\n", NEW);
+  write('graph/d.ts', "import { a } from './a';\nexport const d = a;\n", NEW);
+  write('graph/e.ts', "import { c } from './c';\nimport React from 'react';\nexport const e = c;\n", NEW);
+  write('graph/z.ts', 'export const z = 0;\n', NEW);
+  const deps = hyperglobDependents('graph/c.ts', { cwd: root });
+  assert.deepEqual(deps, ['graph/a.ts', 'graph/b.ts', 'graph/d.ts', 'graph/e.ts']);
+  assert.deepEqual(hyperglobDependents('graph/a.ts', { cwd: root }), ['graph/d.ts']);
+  assert.throws(() => hyperglobDependents('graph/nope.ts', { cwd: root }), /not found/);
+});
+
+test('warm index: builds, answers, detects structural + content changes', () => {
+  const iroot = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperglob-index-'));
+  try {
+    fs.mkdirSync(path.join(iroot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(iroot, '.gitignore'), 'dist/\n');
+    fs.writeFileSync(path.join(iroot, 'src', 'one.ts'), 'export const one = 1;\n');
+    fs.writeFileSync(path.join(iroot, 'src', 'two.ts'), 'export const two = 2;\n');
+    const q = (opts) => hyperglobSync('src/**/*.ts', { cwd: iroot, pathsOnly: true, ...opts }).sort();
+    // Cold: builds the snapshot.
+    assert.deepEqual(q({ index: true }), ['src/one.ts', 'src/two.ts']);
+    assert.ok(fs.existsSync(path.join(iroot, '.hyperglob', 'index.json')));
+    // Warm: same answer, and .hyperglob itself never leaks into results.
+    assert.deepEqual(q({ index: true }), ['src/one.ts', 'src/two.ts']);
+    assert.deepEqual(hyperglobSync('**/*.json', { cwd: iroot, pathsOnly: true, index: true }), []);
+    // Content edit (no directory change): selector answers stay exact,
+    // because matched entries are re-stat'ed / read fresh.
+    fs.writeFileSync(path.join(iroot, 'src', 'one.ts'), 'export const one = 1;\n// padded\n'.padEnd(500, 'x'));
+    const big = hyperglobSync('src/**/*.ts :size(>100b)', { cwd: iroot, pathsOnly: true, index: true });
+    assert.deepEqual(big, ['src/one.ts']);
+    // Structural change: new file appears after the parent dir is touched
+    // (explicit utimes bump defeats coarse mtime granularity in tests).
+    fs.writeFileSync(path.join(iroot, 'src', 'three.ts'), 'export const three = 3;\n');
+    const future = new Date(Date.now() + 5000);
+    fs.utimesSync(path.join(iroot, 'src'), future, future);
+    assert.deepEqual(q({ index: true }), ['src/one.ts', 'src/three.ts', 'src/two.ts']);
+    // Corrupt snapshot: falls back to a rebuild, still correct.
+    fs.writeFileSync(path.join(iroot, '.hyperglob', 'index.json'), '{broken');
+    assert.deepEqual(q({ index: true }), ['src/one.ts', 'src/three.ts', 'src/two.ts']);
+  } finally {
+    fs.rmSync(iroot, { recursive: true, force: true });
+  }
+});
+
 test('MCP server answers initialize, tools/list, tools/call over stdio', async () => {
   const { spawn } = require('child_process');
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'mcp.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -238,7 +291,7 @@ test('MCP server answers initialize, tools/list, tools/call over stdio', async (
     const init = await call(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
     assert.equal(init.result.serverInfo.name, 'hyperglob');
     const list = await call(2, 'tools/list', {});
-    assert.deepEqual(list.result.tools.map((t) => t.name).sort(), ['hyperglob_paths', 'hyperglob_query']);
+    assert.deepEqual(list.result.tools.map((t) => t.name).sort(), ['hyperglob_dependents', 'hyperglob_paths', 'hyperglob_query']);
     const res = await call(3, 'tools/call', {
       name: 'hyperglob_paths',
       arguments: { pattern: 'src/**/*.ts :exports("useServerHook")', cwd: root },

@@ -11,7 +11,7 @@
 //   hyperglob_paths — paths-only fast path, one path per line
 
 const readline = require('readline');
-const { hyperglobSync, version } = require('./index.js');
+const { hyperglobSync, hyperglobDependents, version } = require('./index.js');
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -30,8 +30,22 @@ const TOOLS = [
         cwd: { type: 'string', description: 'Root directory to search from (default: server cwd)' },
         maxDepth: { type: 'number', description: 'Maximum traversal depth' },
         content: { type: 'boolean', description: 'Include file contents in entries (default false)' },
+        index: { type: 'boolean', description: 'Use the warm index snapshot at <cwd>/.hyperglob/ for repeat queries (default false)' },
       },
       required: ['pattern'],
+    },
+  },
+  {
+    name: 'hyperglob_dependents',
+    description:
+      'Import-graph query: list every JS/TS file that imports the given file (a cwd-relative path like src/hooks.ts) directly or transitively — the "what breaks if I change this file" set.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Cwd-relative path of the file whose dependents to find' },
+        cwd: { type: 'string', description: 'Root directory (default: server cwd)' },
+      },
+      required: ['target'],
     },
   },
   {
@@ -44,6 +58,7 @@ const TOOLS = [
         pattern: { type: 'string', description: 'Glob pattern, optionally followed by selectors' },
         cwd: { type: 'string', description: 'Root directory to search from (default: server cwd)' },
         maxDepth: { type: 'number', description: 'Maximum traversal depth' },
+        index: { type: 'boolean', description: 'Use the warm index snapshot at <cwd>/.hyperglob/ for repeat queries (default false)' },
       },
       required: ['pattern'],
     },
@@ -67,6 +82,7 @@ function runQuery(args, pathsOnly) {
   if (args.cwd) opts.cwd = args.cwd;
   if (typeof args.maxDepth === 'number') opts.maxDepth = args.maxDepth;
   if (args.content) opts.content = true;
+  if (args.index) opts.index = true;
   const entries = hyperglobSync(args.pattern, opts);
   if (pathsOnly) return entries.join('\n');
   return JSON.stringify(
@@ -109,6 +125,21 @@ function handle(msg) {
       const tool = TOOLS.find((t) => t.name === name);
       if (!tool) {
         error(id, -32602, `unknown tool: ${name}`);
+        break;
+      }
+      if (name === 'hyperglob_dependents') {
+        if (typeof args.target !== 'string' || args.target.length === 0) {
+          error(id, -32602, 'target (string) is required');
+          break;
+        }
+        try {
+          const opts = {};
+          if (args.cwd) opts.cwd = args.cwd;
+          const deps = hyperglobDependents(args.target, opts);
+          result(id, { content: [{ type: 'text', text: deps.join('\n') }] });
+        } catch (e) {
+          result(id, { content: [{ type: 'text', text: `hyperglob error: ${e.message}` }], isError: true });
+        }
         break;
       }
       if (typeof args.pattern !== 'string' || args.pattern.length === 0) {

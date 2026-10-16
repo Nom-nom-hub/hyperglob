@@ -43,8 +43,8 @@ for (let k=0;k<200;k++) {
 import { execFileSync } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import { createRequire } from 'node:module';
-const require = createRequire('/home/hatch/workspace/hyperglob/package.json');
-const { hyperglobSync } = require('/home/hatch/workspace/hyperglob/index.js');
+const require = createRequire(import.meta.url);
+const { hyperglobSync } = require('../index.js');
 const fg = require('fast-glob');
 const root = fixtureDir;
 const RUNS = 5;

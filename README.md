@@ -79,7 +79,7 @@ npx hyperglob 'src/**/*.ts :exports("useServerHook")' --json
 | `src/**/*.ts` | Standard fast multi-threaded glob. |
 | `src/**/*.ts :contains("export const")` | Only files whose content contains the literal (evaluated in Rust during the crawl). `:contains(/regex/)` and `:matches("regex")` run a regex byte search. |
 | `src/**/*.ts :exports("useServerHook")` | **Full AST check** (oxc parser): the module really exports that name — any form: declarations, `export { a as b }`, re-exports, default exports. Export-shaped text inside comments or string literals does **not** match. |
-| `src/**/*.ts :imports("react")` | AST check: the module imports from `react` (exact source or a subpath like `react/jsx-runtime`); `require()` and dynamic `import()` calls count too. |
+| `src/**/*.ts :imports("react")` | AST check: the module depends on `react` (exact source or a subpath like `react/jsx-runtime`); `require()`, dynamic `import()`, and re-export (`export … from`) sources count too. |
 | `src/**/*.json :has-key("dependencies.react")` | Evaluates JSON structure in-flight during traversal (dotted path, array indices work). |
 | `src/**/* :size(<100kb)` | Files smaller than 100KB, filtered at the OS stat step. Ops: `< <= > >= =`; units `b kb mb gb kib mib gib`. |
 | `src/**/* :modified(>2026-10-01)` | Filters on filesystem mtime (UTC). Accepts `YYYY-MM-DD` and full ISO datetimes. |
@@ -88,13 +88,25 @@ Selectors compose with AND semantics and stack with plain patterns and `!` negat
 
 ## MCP server (for agents)
 
-`mcp.js` exposes hyperglob as an MCP tool server over stdio — any MCP-speaking agent (Claude, Cursor, Cline, custom runtimes) can run discovery queries without Node bindings:
+`mcp.js` exposes hyperglob as an MCP tool server over stdio — any MCP-speaking agent can run discovery queries without Node bindings. Tools: `hyperglob_query` (full entries as JSON), `hyperglob_paths` (paths-only fast path), and `hyperglob_dependents` (transitive importers of a file). Query tools take `pattern` (with selectors), optional `cwd`, `maxDepth`, and `index: true` for the warm index; `hyperglob_query` also accepts `content: true`.
 
+**Claude Code**
+```bash
+claude mcp add hyperglob -- node /path/to/hyperglob/mcp.js
+```
+
+**Cursor** (`.cursor/mcp.json`) / **Cline** (MCP settings) / generic MCP clients
 ```json
 { "mcpServers": { "hyperglob": { "command": "node", "args": ["/path/to/hyperglob/mcp.js"] } } }
 ```
 
-Tools: `hyperglob_query` (full entries as JSON) and `hyperglob_paths` (paths-only fast path). Both take `pattern` (with selectors), optional `cwd` and `maxDepth`; `hyperglob_query` also accepts `content: true`.
+## Warm index
+
+Pass `index: true` (CLI: `--index`) to maintain a snapshot of the tree at `<cwd>/.hyperglob/index.json`. Repeat queries validate the snapshot by stat-ing directories and ignore files (structural changes bump a parent directory's mtime, so validated path answers are exact), then answer in memory — at 110k files a warm `pathsOnly` query measured **39 ms vs 83 ms** for a full walk, and warm entries+stats ~**322 vs 452 ms**. Metadata for matched entries is refreshed with a stat and content selectors always read fresh bytes, so answers stay exact; the snapshot rebuilds automatically on any validation mismatch. (One known edge: filesystems with 1-second mtime granularity can miss a structural change made in the same second as the snapshot build.)
+
+## Import graph: dependents
+
+`hyperglobDependents('packages/shared/ReactSymbols.js', { cwd })` (CLI: `hyperglob --dependents <path>`, MCP: `hyperglob_dependents`) returns every JS/TS file that imports the target directly or transitively — the "what breaks if I change this file" set. Resolution covers relative paths (with TS ESM extension mapping, `./b.js` → `./b.ts`), `index.*` files, and bare monorepo specifiers (`shared/ReactSymbols`) via suffix matching with longest-prefix disambiguation. On the real React repo, dependents of `packages/shared/ReactSymbols.js` = **831 files in ~285 ms**.
 
 ## Ignore stack
 
@@ -161,7 +173,7 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 | `gitignore` | `true` | `.gitignore` + global + `.git/info/exclude`. |
 | `ignoreFiles` | `true` | `.ignore` + `.agentignore`. |
 | `dot` | `false` | Include dotfiles/dot-directories. |
-| `maxDepth` | — | Depth relative to `cwd`. |
+| `maxDepth` | — | Depth below the patterns' static base (fast-glob `deep` semantics). |
 | `threads` | `0` (auto) | Walker threads. |
 | `stats` | `true` | Populate `size` / `modified`. `false` skips a stat per file. |
 | `onlyFiles` | `true` | Files only. |
@@ -169,6 +181,7 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 | `content` | `false` | Attach `content` (string) + `buffer` to entries. |
 | `ignore` | `[]` | Extra glob patterns to exclude. |
 | `pathsOnly` | `false` | Return path strings (fast path). |
+| `index` | `false` | Use the warm index snapshot at `<cwd>/.hyperglob/` (sync APIs; see Warm index). |
 
 ## Roadmap (from the PRD)
 
@@ -178,6 +191,9 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 - [x] Phase 4: Benchmark suite — fast-glob / fdir / tinyglobby comparisons (`npm run bench`)
 - [x] Full AST parsing via `oxc_parser` (v0.3.0: `:exports` and `:imports` are AST-exact for JS/TS; regex signature fallback remains for other file types)
 - [x] MCP server (v0.3.0: `mcp.js` / `hyperglob-mcp` bin — any MCP-speaking agent can query without Node bindings)
+- [x] Warm index (v0.4.0: `.hyperglob/` snapshot with directory-mtime validation; repeat queries answer in memory)
+- [x] Import graph (v0.4.0: `hyperglobDependents` — transitive importers across relative, index-file, and bare monorepo specifiers)
+- [x] Proof suite (v0.4.0: `bench/parity.mjs` result-parity vs fast-glob on seeded random trees — it caught a real maxDepth semantics divergence; `bench/real-repo.mjs` on real checkouts; `bench/check-regression.mjs` perf gate)
 - [ ] True zero-copy buffers for `content` (currently Rust-allocated, streamed in batches; content strings are copied once across the boundary)
 - [ ] Prebuilt binaries for Linux/macOS/Windows (napi-rs CI matrix) — blocked locally on GitHub `workflow` token scope
 - [x] Plain-path performance pass (v0.2.0: custom rayon traversal + columnar transport — hyperglob now wins the plain-glob rows too, see Benchmarks)
@@ -186,10 +202,13 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 
 ```bash
 npm run build     # cargo build --release + stage .node
-npm test          # Rust unit tests are run via `cargo test` (9 tests); npm test runs the Node suite (23 tests)
+npm test          # Rust unit tests are run via `cargo test` (9 tests); npm test runs the Node suite (25 tests)
 cargo test        # selector parser unit tests
 npm run example   # the PRD's §4/§5 examples, live
-npm run bench     # benchmark suite
+npm run bench     # benchmark suite (synthetic trees, interleaved vs fast-glob/glob/fdir/tinyglobby)
+npm run bench:parity   # result-parity vs fast-glob on seeded random trees
+node bench/real-repo.mjs /path/to/repo   # bench + parity on a real checkout
+npm run bench:check    # perf-regression gate against bench/baseline.json
 ```
 
 Node 18+, stable Rust. License: MIT.

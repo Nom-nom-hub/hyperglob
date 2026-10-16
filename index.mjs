@@ -2,6 +2,7 @@ import cjs from './index.js';
 
 export const hyperglob = cjs.hyperglob;
 export const hyperglobSync = cjs.hyperglobSync;
+export const hyperglobDependents = cjs.hyperglobDependents;
 export const HyperglobStream = cjs.HyperglobStream;
 export const parseQuery = cjs.parseQuery;
 export const version = cjs.version;

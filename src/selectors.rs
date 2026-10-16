@@ -217,6 +217,8 @@ pub fn ast_module_info(bytes: &[u8], ext: &str) -> Option<(HashSet<String>, Hash
                 for spec in &decl.specifiers {
                     exports.insert(exported_name(&spec.exported));
                 }
+                // A re-export is also a module dependency.
+                imports.insert(decl.source.value.as_str().to_string());
             }
             Statement::ExportDefaultDeclaration(decl) => {
                 exports.insert("default".to_string());

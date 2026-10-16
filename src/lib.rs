@@ -7,6 +7,8 @@
 //! in small chunks allocated on the Rust side instead of one giant array.
 
 mod engine;
+mod graph;
+mod index;
 mod selectors;
 
 use engine::{Engine, Options};
@@ -255,6 +257,16 @@ pub fn create_scanner(patterns: Vec<String>, options_json: Option<String>) -> Re
         buffer: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         finished: Arc::new(AtomicBool::new(false)),
     })
+}
+
+/// Import-graph query: every JS/TS file under cwd that imports `target`
+/// (a cwd-relative path) directly or transitively, as one NUL-joined
+/// string of relative paths.
+#[napi]
+pub fn dependents_of_sync(target: String, options_json: Option<String>) -> Result<String> {
+    let options = parse_options(options_json)?;
+    let deps = graph::dependents_of(options, &target).map_err(|e| Error::from_reason(e))?;
+    Ok(deps.join("\0"))
 }
 
 /// Debug/introspection helper: parse a query and return its structure as JSON.

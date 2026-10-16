@@ -56,6 +56,7 @@ function normalizeOptions(options) {
   const withContent = options.withContent !== undefined ? options.withContent : options.content;
   if (withContent !== undefined) out.withContent = !!withContent;
   if (options.ignore !== undefined) out.ignore = toPatterns(options.ignore);
+  if (options.index !== undefined) out.index = !!options.index;
   return out;
 }
 
@@ -274,9 +275,21 @@ function parseQuery(input) {
   return JSON.parse(native.parseQueryJson(String(input)));
 }
 
+/**
+ * hyperglobDependents(target, options) -> string[]
+ * Import-graph query: every JS/TS file under `cwd` that imports `target`
+ * (a cwd-relative path like 'src/hooks.ts') directly or transitively —
+ * the "what breaks if I change this file" set.
+ */
+function hyperglobDependents(target, options) {
+  const opts = normalizeOptions(options);
+  return splitPaths(native.dependentsOfSync(String(target), opts ? JSON.stringify(opts) : null));
+}
+
 module.exports = {
   hyperglob,
   hyperglobSync,
+  hyperglobDependents,
   HyperglobStream,
   HyperEntry,
   parseQuery,

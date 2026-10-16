@@ -1,6 +1,6 @@
 [package]
 name = "hyperglob"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "A multi-threaded, AST-aware, zero-copy file discovery engine designed to replace legacy globbing for AI agents, monorepos, and high-performance developer tooling."
 license = "MIT"

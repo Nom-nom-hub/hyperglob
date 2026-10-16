@@ -7,7 +7,7 @@ export interface HyperglobOptions {
   ignoreFiles?: boolean;
   /** Include dotfiles / dot-directories. Default: false. */
   dot?: boolean;
-  /** Maximum traversal depth relative to cwd. */
+  /** Maximum traversal depth below the search root (the patterns' static base), matching fast-glob's `deep`. */
   maxDepth?: number;
   /** Walker threads. 0 = auto. */
   threads?: number;
@@ -28,6 +28,13 @@ export interface HyperglobOptions {
    * The fast path for pure path discovery. Default: false.
    */
   pathsOnly?: boolean;
+  /**
+   * Use (and maintain) the warm index snapshot at `<cwd>/.hyperglob/`.
+   * Repeat queries validate directory mtimes and answer in memory;
+   * metadata for matched entries is refreshed with a stat, content is
+   * always read fresh. Sync APIs only. Default: false.
+   */
+  index?: boolean;
 }
 
 export interface Entry {
@@ -88,6 +95,16 @@ export declare function hyperglobSync(
 ): string[];
 
 export declare function parseQuery(input: string): ParsedQuery;
+
+/**
+ * Import-graph query: every JS/TS file under `cwd` that imports `target`
+ * (a cwd-relative path, e.g. 'src/hooks.ts') directly or transitively.
+ */
+export declare function hyperglobDependents(
+  target: string,
+  options?: HyperglobOptions
+): string[];
+
 export declare function version(): string;
 
 export default hyperglob;

@@ -34,6 +34,8 @@ pub struct Options {
     pub follow_symlinks: bool,
     pub with_content: bool,
     pub ignore: Vec<String>,
+    /// Use (and maintain) the warm index snapshot at <cwd>/.hyperglob/.
+    pub index: bool,
 }
 
 impl Default for Options {
@@ -50,6 +52,7 @@ impl Default for Options {
             follow_symlinks: false,
             with_content: false,
             ignore: Vec::new(),
+            index: false,
         }
     }
 }
@@ -156,7 +159,7 @@ fn build_glob_set(patterns: &[String]) -> Result<globset::GlobSet, String> {
     builder.build().map_err(|e| format!("invalid glob patterns: {e}"))
 }
 
-fn set_matches(set: &globset::GlobSet, rel: &str) -> bool {
+pub(crate) fn set_matches(set: &globset::GlobSet, rel: &str) -> bool {
     !set.is_empty() && set.is_match(rel)
 }
 
@@ -216,7 +219,13 @@ impl Engine {
         };
         let positive_set = build_glob_set(&query.patterns)?;
         let negative_set = build_glob_set(&query.negatives)?;
-        let ignore_set = build_glob_set(&options.ignore)?;
+        let mut ignore_patterns = options.ignore.clone();
+        if options.index {
+            // The index's own directory must never leak into indexed results.
+            ignore_patterns.push(".hyperglob".to_string());
+            ignore_patterns.push(".hyperglob/**".to_string());
+        }
+        let ignore_set = build_glob_set(&ignore_patterns)?;
         let stats_requested = options.stats;
         let has_meta_selectors = query
             .selectors
@@ -430,11 +439,14 @@ impl Engine {
         let threads = self.options.threads;
         let run = || {
             rayon::scope(|scope| {
+                // Depth is counted from the walk root (the patterns' static
+                // base), matching fast-glob's `deep` semantics: with
+                // `src/**/*.ts` + maxDepth 2, files in src/ and src/a/ match.
                 walker.visit(
                     scope,
                     self.walk_root.clone(),
                     self.walk_root_rel.clone(),
-                    self.root_depth,
+                    0,
                     Arc::new(stack),
                 );
             });
@@ -449,8 +461,8 @@ impl Engine {
         }
     }
 
-    /// Collect every matching entry into a Vec.
-    pub fn collect(&self) -> Vec<Entry> {
+    /// Raw batched collect (no index routing). `light` = pathsOnly mode.
+    pub(crate) fn collect_entries_raw(&self, light: bool) -> Vec<Entry> {
         let (tx, rx) = crossbeam_channel::unbounded::<Vec<Entry>>();
         let drain = std::thread::spawn(move || {
             let mut out = Vec::new();
@@ -459,24 +471,30 @@ impl Engine {
             }
             out
         });
-        self.run_batched(tx, false);
+        self.run_batched(tx, light);
         drain.join().unwrap_or_default()
+    }
+
+    /// Collect every matching entry into a Vec.
+    pub fn collect(&self) -> Vec<Entry> {
+        if self.options.index {
+            return crate::index::collect_indexed(self, false);
+        }
+        self.collect_entries_raw(false)
     }
 
     /// Collect matching relative paths only (fast path).
     pub fn collect_paths(&self) -> Vec<String> {
-        let (tx, rx) = crossbeam_channel::unbounded::<Vec<Entry>>();
-        let drain = std::thread::spawn(move || {
-            let mut out = Vec::new();
-            while let Ok(batch) = rx.recv() {
-                for e in batch {
-                    out.push(e.relative_path);
-                }
-            }
-            out
-        });
-        self.run_batched(tx, true);
-        drain.join().unwrap_or_default()
+        if self.options.index {
+            return crate::index::collect_indexed(self, true)
+                .into_iter()
+                .map(|e| e.relative_path)
+                .collect();
+        }
+        self.collect_entries_raw(true)
+            .into_iter()
+            .map(|e| e.relative_path)
+            .collect()
     }
 }
 
