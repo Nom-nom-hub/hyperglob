@@ -57,7 +57,7 @@
     "postinstall": "node scripts/install.js"
   },
   "types": "index.d.ts",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "dependencies": {
     "@blazeinstall/hyperglob": "^1.0.2"
   },
