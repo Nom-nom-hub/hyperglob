@@ -1,0 +1,59 @@
+name: Release binaries
+
+# On a version tag, build the native module on each platform and attach
+# every .node binary to the GitHub release for that tag.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64-gnu
+          - os: ubuntu-24.04-arm
+            target: linux-arm64-gnu
+          - os: macos-13
+            target: darwin-x64
+          - os: macos-latest
+            target: darwin-arm64
+          - os: windows-latest
+            target: win32-x64-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build + test
+        run: npm install --ignore-scripts && npm test
+      - name: Upload .node artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperglob-${{ matrix.target }}
+          path: hyperglob.*.node
+          if-no-files-found: error
+
+  publish:
+    name: attach binaries to release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Attach to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.node
+          fail_on_unmatched_files: true
