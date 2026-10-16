@@ -85,6 +85,100 @@ function scanRawSync(patterns, options) {
   return native.scanSync(toPatterns(patterns), opts ? JSON.stringify(opts) : null);
 }
 
+// Entry objects are instances of this class: `modified` (Date) and
+// `buffer` are prototype getters, built lazily on first access — creating
+// 10k+ Dates/Buffers eagerly is pure overhead when most consumers never
+// touch them. `modifiedMs` is always present as a plain number.
+class HyperEntry {
+  get modified() {
+    if (this._modified === undefined) {
+      this._modified = new Date(this.modifiedMs);
+    }
+    return this._modified;
+  }
+
+  get buffer() {
+    if (this.content === undefined) return undefined;
+    if (this._buffer === undefined) {
+      this._buffer = Buffer.from(this.content, 'utf8');
+    }
+    return this._buffer;
+  }
+
+  toJSON() {
+    const out = {
+      path: this.path,
+      relativePath: this.relativePath,
+      name: this.name,
+      extension: this.extension,
+      isFile: this.isFile,
+      isDir: this.isDir,
+    };
+    if (this.size !== undefined) {
+      out.size = this.size;
+      out.modifiedMs = this.modifiedMs;
+      out.modified = this.modified.toISOString();
+    }
+    if (this.content !== undefined) out.content = this.content;
+    return out;
+  }
+}
+
+function splitJoined(s, n) {
+  if (n === 0) return [];
+  if (s === '') return new Array(n).fill('');
+  return s.split('\0');
+}
+
+// Zip the native columnar transport into Entry objects.
+function columnsToEntries(cols, options) {
+  const n = cols.count;
+  const out = new Array(n);
+  if (n === 0) return out;
+  const paths = splitJoined(cols.paths, n);
+  const rels = splitJoined(cols.relativePaths, n);
+  const names = splitJoined(cols.names, n);
+  const exts = splitJoined(cols.extensions, n);
+  const flags = cols.flags;
+  const withStats = !options || options.stats !== false;
+  const numBuf = cols.numbers;
+  let nums = null;
+  if (withStats) {
+    nums = numBuf.byteOffset % 8 === 0
+      ? new Float64Array(numBuf.buffer, numBuf.byteOffset, n * 2)
+      : new Float64Array(Uint8Array.from(numBuf).buffer);
+  }
+  const fullContents = cols.contents.length === n;
+  for (let i = 0; i < n; i++) {
+    const entry = new HyperEntry();
+    entry.path = paths[i];
+    entry.relativePath = rels[i];
+    entry.name = names[i];
+    entry.extension = exts[i];
+    const f = flags[i];
+    entry.isFile = (f & 1) !== 0;
+    entry.isDir = (f & 2) !== 0;
+    if (withStats) {
+      entry.size = nums[i * 2];
+      entry.modifiedMs = nums[i * 2 + 1];
+    }
+    if (fullContents && cols.hasContent[i]) {
+      entry.content = cols.contents[i];
+    }
+    out[i] = entry;
+  }
+  return out;
+}
+
+function splitPaths(joined) {
+  return joined === '' ? [] : joined.split('\0');
+}
+
+function scanColumnsSync(patterns, options) {
+  const opts = normalizeOptions(options);
+  return native.scanColumnsSync(toPatterns(patterns), opts ? JSON.stringify(opts) : null);
+}
+
 /**
  * hyperglobSync(patterns, options) -> Entry[]
  * Synchronous batch API (PRD §5.2).
@@ -94,9 +188,9 @@ function scanRawSync(patterns, options) {
 function hyperglobSync(patterns, options) {
   if (options && options.pathsOnly) {
     const opts = normalizeOptions(options);
-    return native.scanPathsSync(toPatterns(patterns), opts ? JSON.stringify(opts) : null);
+    return splitPaths(native.scanPathsSync(toPatterns(patterns), opts ? JSON.stringify(opts) : null));
   }
-  return scanRawSync(patterns, options).map((e) => toEntry(e, options));
+  return columnsToEntries(scanColumnsSync(patterns, options), options);
 }
 
 class HyperglobStream {
@@ -121,8 +215,8 @@ class HyperglobStream {
   async *[Symbol.asyncIterator]() {
     if (this._options && this._options.pathsOnly) {
       const opts = normalizeOptions(this._options);
-      const paths = native.scanPathsSync(this._patterns, opts ? JSON.stringify(opts) : null);
-      for (const p of paths) yield p;
+      const joined = native.scanPathsSync(this._patterns, opts ? JSON.stringify(opts) : null);
+      for (const p of splitPaths(joined)) yield p;
       return;
     }
     const scanner = this._open();
@@ -184,6 +278,7 @@ module.exports = {
   hyperglob,
   hyperglobSync,
   HyperglobStream,
+  HyperEntry,
   parseQuery,
   version: () => native.version(),
   native,

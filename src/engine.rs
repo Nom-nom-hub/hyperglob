@@ -1,18 +1,23 @@
-//! Parallel directory walker + in-flight selector engine.
+//! Parallel directory traversal + in-flight selector engine.
 //!
-//! Uses the `ignore` crate's parallel walker (which internally fans out over
-//! a work-stealing thread pool) with a native ignore stack: .gitignore,
-//! .ignore, .git/info/exclude, global gitignore, and .agentignore.
+//! Traversal is a custom rayon work-stealing walk over `std::fs::read_dir`
+//! (the `ignore` crate's walker measured ~3x slower than raw readdir on our
+//! benchmark VM). Ignore rules still come from the `ignore` crate — its
+//! `Gitignore` matcher is the battle-tested part — applied as a per-directory
+//! stack: each directory's .gitignore / .ignore / .agentignore is loaded when
+//! the directory is entered, deeper matchers win, and an ignored directory
+//! prunes its whole subtree (which is also what git itself does).
+//!
 //! Glob matching, metadata selectors and content selectors all run inside
-//! the walker visitor threads — files are filtered before they ever cross
-//! the N-API boundary.
+//! the traversal tasks — files are filtered before they ever cross the
+//! N-API boundary. Results leave through a crossbeam channel in batches.
 
-use crate::selectors::{parse_queries, Query};
-use ignore::{WalkBuilder, WalkState};
+use crate::selectors::{parse_queries, Query, Selector};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use rayon::prelude::*;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -74,10 +79,7 @@ fn static_prefix(pattern: &str) -> PathBuf {
         if has_magic(seg) {
             break;
         }
-        if seg == "." {
-            continue;
-        }
-        if seg.is_empty() {
+        if seg == "." || seg.is_empty() {
             continue;
         }
         out.push(seg);
@@ -133,7 +135,6 @@ fn expand_pattern(pattern: &str) -> Vec<String> {
             work.push(prefix.to_string());
         }
     }
-    // A magic-free pattern that names a directory matches everything under it.
     if !pattern.chars().any(|c| "*?{[".contains(c)) {
         let trimmed = pattern.trim_end_matches('/');
         out.push(format!("{trimmed}/**"));
@@ -166,10 +167,16 @@ pub struct Engine {
     pub walk_root: PathBuf,
     /// depth of walk_root below cwd (for maxDepth accounting)
     pub root_depth: usize,
+    /// posix relative path of walk_root below cwd ("" when walk_root == cwd)
+    pub walk_root_rel: String,
     pub positive_set: globset::GlobSet,
     pub negative_set: globset::GlobSet,
     pub ignore_set: globset::GlobSet,
-    pub needs_metadata: bool,
+    /// options.stats — populate Entry size/modified (full entries only).
+    pub stats_requested: bool,
+    /// A :size / :modified selector is present (metadata needed in any mode).
+    pub has_meta_selectors: bool,
+    pub needs_content: bool,
 }
 
 impl Engine {
@@ -181,9 +188,7 @@ impl Engine {
                 if p.is_absolute() {
                     p
                 } else {
-                    std::env::current_dir()
-                        .map_err(|e| e.to_string())?
-                        .join(p)
+                    std::env::current_dir().map_err(|e| e.to_string())?.join(p)
                 }
             }
             None => std::env::current_dir().map_err(|e| e.to_string())?,
@@ -193,7 +198,6 @@ impl Engine {
             .iter()
             .map(|p| {
                 let sp = static_prefix(p);
-                // If the static prefix names a file (no magic at all), walk its parent.
                 let abs = cwd.join(&sp);
                 if abs.is_file() {
                     sp.parent().map(|x| x.to_path_buf()).unwrap_or_default()
@@ -204,6 +208,7 @@ impl Engine {
             .collect();
         let root_rel = common_ancestor(&static_dirs);
         let root_depth = root_rel.components().count();
+        let walk_root_rel = root_rel.to_string_lossy().replace('\\', "/");
         let walk_root = if root_rel.as_os_str().is_empty() {
             cwd.clone()
         } else {
@@ -212,232 +217,500 @@ impl Engine {
         let positive_set = build_glob_set(&query.patterns)?;
         let negative_set = build_glob_set(&query.negatives)?;
         let ignore_set = build_glob_set(&options.ignore)?;
-        let needs_metadata = options.stats
-            || query
-                .selectors
-                .iter()
-                .any(|s| !s.needs_content() && matches!(s, crate::selectors::Selector::Size(..) | crate::selectors::Selector::Modified(..)));
+        let stats_requested = options.stats;
+        let has_meta_selectors = query
+            .selectors
+            .iter()
+            .any(|s| matches!(s, Selector::Size(..) | Selector::Modified(..)));
+        let needs_content = query.selectors.iter().any(|s| s.needs_content());
         Ok(Engine {
             query,
             options,
             cwd,
             walk_root,
             root_depth,
+            walk_root_rel,
             positive_set,
             negative_set,
             ignore_set,
-            needs_metadata,
+            stats_requested,
+            has_meta_selectors,
+            needs_content,
         })
     }
 
-    fn build_walker(&self) -> ignore::WalkParallel {
-        let mut builder = WalkBuilder::new(&self.walk_root);
-        builder
-            .standard_filters(false)
-            .hidden(!self.options.dot)
-            .git_ignore(self.options.gitignore)
-            .git_global(self.options.gitignore)
-            .git_exclude(self.options.gitignore)
-            .ignore(self.options.ignore_files)
-            .parents(true)
-            .require_git(false)
-            .follow_links(self.options.follow_symlinks)
-            .threads(self.options.threads);
+    // ---------- ignore stack ----------
+
+    fn matcher_for_dir(&self, dir: &Path, is_cwd: bool) -> Option<Gitignore> {
+        let mut builder = GitignoreBuilder::new(dir);
+        let mut any = false;
+        if self.options.gitignore {
+            let gi = dir.join(".gitignore");
+            if gi.is_file() {
+                builder.add(&gi);
+                any = true;
+            }
+            if is_cwd {
+                let excl = dir.join(".git").join("info").join("exclude");
+                if excl.is_file() {
+                    builder.add(&excl);
+                    any = true;
+                }
+            }
+        }
         if self.options.ignore_files {
-            builder.add_custom_ignore_filename(".agentignore");
+            for name in [".ignore", ".agentignore"] {
+                let f = dir.join(name);
+                if f.is_file() {
+                    builder.add(&f);
+                    any = true;
+                }
+            }
         }
-        if let Some(md) = self.options.max_depth {
-            // maxDepth is expressed relative to cwd (a file at src/a.ts is
-            // depth 2). The walker counts depth from walk_root, whose own
-            // depth below cwd is root_depth, so subtract it.
-            let adjusted = md.saturating_sub(self.root_depth);
-            builder.max_depth(Some(adjusted));
+        if !any {
+            return None;
         }
-        builder.build_parallel()
+        builder.build().ok()
     }
 
-    /// Run the parallel walk, sending every matching entry on `tx`.
-    /// Returns when traversal is complete and all visitors have dropped their senders.
-    /// In light mode only `relative_path` is populated (pathsOnly fast path).
-    pub fn run(&self, tx: Sender<Entry>) {
-        self.run_mode(tx, false)
+    fn global_matcher(&self) -> Option<Gitignore> {
+        if !self.options.gitignore {
+            return None;
+        }
+        // The global gitignore is a per-process constant in practice;
+        // building it re-reads git config files on every scan otherwise.
+        static GLOBAL: std::sync::OnceLock<Option<Gitignore>> = std::sync::OnceLock::new();
+        GLOBAL
+            .get_or_init(|| {
+                let (gi, _err) = GitignoreBuilder::new("").build_global();
+                if gi.is_empty() {
+                    None
+                } else {
+                    Some(gi)
+                }
+            })
+            .clone()
     }
 
-    fn run_mode(&self, tx: Sender<Entry>, light: bool) {
-        let walker = self.build_walker();
-        let query = self.query.clone();
-        let options = self.options.clone();
-        let cwd = self.cwd.clone();
-        let positive_set = self.positive_set.clone();
-        let negative_set = self.negative_set.clone();
-        let ignore_set = self.ignore_set.clone();
-        let needs_metadata = self.needs_metadata;
-
-        walker.run(|| {
-            let tx = tx.clone();
-            let query = query.clone();
-            let options = options.clone();
-            let cwd = cwd.clone();
-            let positive_set = positive_set.clone();
-            let negative_set = negative_set.clone();
-            let ignore_set = ignore_set.clone();
-            Box::new(move |result| {
-                let dent = match result {
-                    Ok(d) => d,
-                    Err(_) => return WalkState::Continue,
-                };
-                let path = dent.path();
-                let ft = match dent.file_type() {
-                    Some(f) => f,
-                    None => return WalkState::Continue,
-                };
-                let is_dir = ft.is_dir();
-                let is_file = ft.is_file();
-
-                // Always traverse directories; only yield them when requested.
-                if is_dir {
-                    if options.only_files {
-                        return WalkState::Continue;
-                    }
-                } else if !is_file {
-                    // symlinks to files etc.: treat non-file non-dir as skip unless following
-                    if !options.follow_symlinks {
-                        return WalkState::Continue;
-                    }
+    /// Stack of matchers applying at walk_root: cwd first, then each
+    /// ancestor directory down to walk_root itself.
+    fn initial_stack(&self) -> Vec<Gitignore> {
+        let mut stack = Vec::new();
+        if !self.options.gitignore && !self.options.ignore_files {
+            return stack;
+        }
+        let mut dir = self.cwd.clone();
+        if let Some(m) = self.matcher_for_dir(&dir, true) {
+            stack.push(m);
+        }
+        if !self.walk_root_rel.is_empty() {
+            for seg in self.walk_root_rel.split('/') {
+                dir.push(seg);
+                if let Some(m) = self.matcher_for_dir(&dir, false) {
+                    stack.push(m);
                 }
+            }
+        }
+        stack
+    }
 
-                let rel_path = match path.strip_prefix(&cwd) {
-                    Ok(r) => r.to_path_buf(),
-                    Err(_) => path.to_path_buf(),
-                };
-                #[cfg(windows)]
-                let rel = rel_path.to_string_lossy().replace('\\', "/");
-                #[cfg(not(windows))]
-                let rel = rel_path.to_string_lossy().into_owned();
-                if rel.is_empty() {
-                    return WalkState::Continue;
-                }
+    // ---------- candidate evaluation ----------
 
-                if !set_matches(&positive_set, &rel) {
-                    return WalkState::Continue;
-                }
-                if set_matches(&negative_set, &rel) {
-                    return WalkState::Continue;
-                }
-                if set_matches(&ignore_set, &rel) {
-                    return WalkState::Continue;
-                }
+    fn eval_entry(
+        &self,
+        rel: String,
+        path: &Path,
+        dent: &std::fs::DirEntry,
+        is_file: bool,
+        is_dir: bool,
+        light: bool,
+    ) -> Option<Entry> {
+        if !set_matches(&self.positive_set, &rel) {
+            return None;
+        }
+        if set_matches(&self.negative_set, &rel) {
+            return None;
+        }
+        if set_matches(&self.ignore_set, &rel) {
+            return None;
+        }
 
-                // Stat lazily: only when stats were requested or a metadata
-                // selector needs the values.
-                let (size, modified_ms) = if needs_metadata {
-                    let metadata = dent.metadata().ok();
-                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                    let modified_ms = metadata
-                        .as_ref()
-                        .and_then(|m| m.modified().ok())
+        let want_metadata = self.has_meta_selectors || (!light && self.stats_requested);
+        let (size, modified_ms) = if want_metadata {
+            match dent.metadata() {
+                Ok(md) => {
+                    let modified_ms = md
+                        .modified()
+                        .ok()
                         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0);
-                    (size, modified_ms)
-                } else {
-                    (0, 0)
-                };
-
-                // Metadata selectors run pre-read, at stat time.
-                for sel in &query.selectors {
-                    if !sel.eval_metadata(size, modified_ms) {
-                        return WalkState::Continue;
-                    }
+                    (md.len(), modified_ms)
                 }
+                Err(_) => (0, 0),
+            }
+        } else {
+            (0, 0)
+        };
 
-                // Content selectors run in-flight, inside the walker thread.
-                let needs_content = query.selectors.iter().any(|s| s.needs_content());
-                let mut content: Option<String> = None;
-                if is_file && (needs_content || options.with_content) {
-                    let bytes = match std::fs::read(path) {
-                        Ok(b) => b,
-                        Err(_) => return WalkState::Continue,
-                    };
-                    for sel in &query.selectors {
-                        if sel.needs_content() && !sel.eval_content(&bytes) {
-                            return WalkState::Continue;
-                        }
-                    }
-                    if options.with_content {
-                        content = Some(String::from_utf8_lossy(&bytes).into_owned());
-                    }
-                }
+        for sel in &self.query.selectors {
+            if !sel.eval_metadata(size, modified_ms) {
+                return None;
+            }
+        }
 
-                let (entry_path, name, extension) = if light {
-                    (String::new(), String::new(), String::new())
-                } else {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let extension = path
-                        .extension()
-                        .map(|e| e.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let absolute = if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        cwd.join(path)
-                    };
-                    (absolute.to_string_lossy().into_owned(), name, extension)
-                };
-                let entry = Entry {
-                    path: entry_path,
-                    relative_path: rel,
-                    name,
-                    extension,
-                    size,
-                    modified_ms,
-                    is_file,
-                    is_dir,
-                    content,
-                };
-                if tx.send(entry).is_err() {
-                    return WalkState::Quit;
+        let mut content: Option<String> = None;
+        if is_file && (self.needs_content || self.options.with_content) {
+            let bytes = std::fs::read(path).ok()?;
+            for sel in &self.query.selectors {
+                if sel.needs_content() && !sel.eval_content(&bytes) {
+                    return None;
                 }
-                WalkState::Continue
-            })
-        });
+            }
+            if self.options.with_content && !light {
+                content = Some(String::from_utf8_lossy(&bytes).into_owned());
+            }
+        } else if self.needs_content && !is_file {
+            // Content selectors can only match files.
+            return None;
+        }
+
+        if light {
+            return Some(Entry {
+                path: String::new(),
+                relative_path: rel,
+                name: String::new(),
+                extension: String::new(),
+                size,
+                modified_ms,
+                is_file,
+                is_dir,
+                content: None,
+            });
+        }
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let extension = path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Some(Entry {
+            path: path.to_string_lossy().into_owned(),
+            relative_path: rel,
+            name,
+            extension,
+            size,
+            modified_ms,
+            is_file,
+            is_dir,
+            content,
+        })
     }
 
-    /// Collect matching relative paths only. Skips Entry construction and
-    /// (unless a selector needs them) stat calls — the fast path for pure
-    /// path discovery, comparable to fast-glob's default string output.
-    pub fn collect_paths(&self) -> Vec<String> {
-        let (tx, rx) = std::sync::mpsc::channel::<Entry>();
-        let out = Arc::new(Mutex::new(Vec::new()));
-        let out_clone = out.clone();
-        let drain = std::thread::spawn(move || {
-            for e in rx {
-                out_clone.lock().unwrap().push(e.relative_path);
+    // ---------- traversal ----------
+
+    /// Run the walk, sending batches of matching entries on `tx`.
+    /// In light mode only `relative_path` is populated (pathsOnly fast path).
+    pub fn run_batched(&self, tx: crossbeam_channel::Sender<Vec<Entry>>, light: bool) {
+        let global = self.global_matcher().map(Arc::new);
+        let stack = self.initial_stack();
+        let walker = Walker {
+            eng: self,
+            global,
+            tx,
+            light,
+        };
+        let threads = self.options.threads;
+        let run = || {
+            rayon::scope(|scope| {
+                walker.visit(
+                    scope,
+                    self.walk_root.clone(),
+                    self.walk_root_rel.clone(),
+                    self.root_depth,
+                    Arc::new(stack),
+                );
+            });
+        };
+        if threads > 0 {
+            match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
+                Ok(pool) => pool.install(run),
+                Err(_) => run(),
             }
-        });
-        self.run_mode(tx, true);
-        let _ = drain.join();
-        let paths = out.lock().unwrap().clone();
-        paths
+        } else {
+            run();
+        }
     }
 
     /// Collect every matching entry into a Vec.
     pub fn collect(&self) -> Vec<Entry> {
-        let (tx, rx) = std::sync::mpsc::channel::<Entry>();
-        let out = Arc::new(Mutex::new(Vec::new()));
-        let out_clone = out.clone();
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<Entry>>();
         let drain = std::thread::spawn(move || {
-            for e in rx {
-                out_clone.lock().unwrap().push(e);
+            let mut out = Vec::new();
+            while let Ok(mut batch) = rx.recv() {
+                out.append(&mut batch);
             }
+            out
         });
-        self.run(tx);
-        let _ = drain.join();
-        let vec = out.lock().unwrap().clone();
-        vec
+        self.run_batched(tx, false);
+        drain.join().unwrap_or_default()
+    }
+
+    /// Collect matching relative paths only (fast path).
+    pub fn collect_paths(&self) -> Vec<String> {
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<Entry>>();
+        let drain = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            while let Ok(batch) = rx.recv() {
+                for e in batch {
+                    out.push(e.relative_path);
+                }
+            }
+            out
+        });
+        self.run_batched(tx, true);
+        drain.join().unwrap_or_default()
+    }
+}
+
+struct Walker<'e> {
+    eng: &'e Engine,
+    global: Option<Arc<Gitignore>>,
+    tx: crossbeam_channel::Sender<Vec<Entry>>,
+    light: bool,
+}
+
+const BATCH: usize = 1024;
+const PAR_FILE_THRESHOLD: usize = 512;
+
+enum Classified {
+    Skip,
+    File(Entry),
+    Dir {
+        rel: String,
+        path: PathBuf,
+        dent: std::fs::DirEntry,
+        depth: usize,
+    },
+}
+
+impl<'e> Walker<'e> {
+    fn excluded(&self, stack: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+        if !self.eng.options.gitignore && !self.eng.options.ignore_files {
+            return false;
+        }
+        for m in stack.iter().rev() {
+            let mt = m.matched(path, is_dir);
+            if mt.is_ignore() {
+                return true;
+            }
+            if mt.is_whitelist() {
+                return false;
+            }
+        }
+        if let Some(g) = &self.global {
+            let mt = g.matched(path, is_dir);
+            if mt.is_ignore() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn flush(&self, out: &mut Vec<Entry>) {
+        if out.is_empty() {
+            return;
+        }
+        let batch = std::mem::replace(out, Vec::with_capacity(BATCH));
+        let _ = self.tx.send(batch);
+    }
+
+    /// One directory entry after the cheap serial pass: everything that
+    /// needs real work is decided in the parallel pass.
+    fn classify(
+        &self,
+        stack: &[Gitignore],
+        rel_dir: &str,
+        dir_depth: usize,
+        dent: std::fs::DirEntry,
+    ) -> Classified {
+        let opts = &self.eng.options;
+        let ft = match dent.file_type() {
+            Ok(f) => f,
+            Err(_) => return Classified::Skip,
+        };
+        let name = dent.file_name().to_string_lossy().into_owned();
+        if name.is_empty() {
+            return Classified::Skip;
+        }
+        let mut is_dir = ft.is_dir();
+        let is_symlink = ft.is_symlink();
+        let path = dent.path();
+        if is_symlink && opts.follow_symlinks {
+            if let Ok(md) = path.metadata() {
+                is_dir = md.is_dir();
+            }
+        }
+        let is_file = ft.is_file() || (is_symlink && !is_dir);
+
+        if !opts.dot && name.starts_with('.') {
+            return Classified::Skip;
+        }
+        if opts.dot && is_dir && name == ".git" && opts.gitignore {
+            return Classified::Skip;
+        }
+
+        let child_rel = if rel_dir.is_empty() {
+            name
+        } else {
+            format!("{rel_dir}/{name}")
+        };
+        let child_depth = dir_depth + 1;
+
+        if self.excluded(stack, &path, is_dir) {
+            return Classified::Skip;
+        }
+
+        if is_dir {
+            Classified::Dir {
+                rel: child_rel,
+                path,
+                dent,
+                depth: child_depth,
+            }
+        } else if is_file {
+            if let Some(md) = opts.max_depth {
+                if child_depth > md {
+                    return Classified::Skip;
+                }
+            }
+            match self
+                .eng
+                .eval_entry(child_rel, &path, &dent, true, false, self.light)
+            {
+                Some(e) => Classified::File(e),
+                None => Classified::Skip,
+            }
+        } else {
+            Classified::Skip
+        }
+    }
+
+    fn visit<'s>(
+        &self,
+        scope: &rayon::Scope<'s>,
+        abs_dir: PathBuf,
+        rel_dir: String,
+        dir_depth: usize,
+        stack: Arc<Vec<Gitignore>>,
+    ) where
+        'e: 's,
+    {
+        let rd = match std::fs::read_dir(&abs_dir) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let raw: Vec<std::fs::DirEntry> = rd.filter_map(|r| r.ok()).collect();
+        let opts = &self.eng.options;
+
+        // Parallel pass for wide directories: classification + matching +
+        // selector evaluation are the per-file costs, so they fan out.
+        // Files fold directly into entry vectors; directories (rare) are
+        // side-channeled through a mutex for the serial spawn pass below.
+        let mut out: Vec<Entry> = Vec::new();
+        let classified: Vec<Classified> = if raw.len() > PAR_FILE_THRESHOLD {
+            let dirs: std::sync::Mutex<Vec<Classified>> = std::sync::Mutex::new(Vec::new());
+            let mut entries: Vec<Entry> = raw
+                .into_par_iter()
+                .fold(Vec::new, |mut acc, dent| {
+                    match self.classify(&stack, &rel_dir, dir_depth, dent) {
+                        Classified::File(e) => acc.push(e),
+                        d @ Classified::Dir { .. } => {
+                            dirs.lock().unwrap().push(d);
+                        }
+                        Classified::Skip => {}
+                    }
+                    acc
+                })
+                .reduce(Vec::new, |mut a, mut b| {
+                    a.append(&mut b);
+                    a
+                });
+            // Send this directory's file entries in batches right away.
+            let mut rest = entries;
+            while rest.len() > BATCH {
+                let tail = rest.split_off(BATCH);
+                let _ = self.tx.send(rest);
+                rest = tail;
+            }
+            if !rest.is_empty() {
+                let _ = self.tx.send(rest);
+            }
+            dirs.into_inner().unwrap_or_default()
+        } else {
+            raw.into_iter()
+                .map(|dent| self.classify(&stack, &rel_dir, dir_depth, dent))
+                .collect()
+        };
+
+        for item in classified {
+            match item {
+                Classified::Skip => {}
+                Classified::File(e) => {
+                    out.push(e);
+                    if out.len() >= BATCH {
+                        self.flush(&mut out);
+                    }
+                }
+                Classified::Dir {
+                    rel: child_rel,
+                    path,
+                    dent,
+                    depth: child_depth,
+                } => {
+                    if !opts.only_files {
+                        if let Some(e) = self.eng.eval_entry(
+                            child_rel.clone(),
+                            &path,
+                            &dent,
+                            false,
+                            true,
+                            self.light,
+                        ) {
+                            out.push(e);
+                        }
+                    }
+                    let can_descend = opts.max_depth.map_or(true, |md| child_depth < md);
+                    if can_descend {
+                        let child_stack =
+                            match self.eng.matcher_for_dir(&path, false) {
+                                Some(m) => {
+                                    let mut v = (*stack).clone();
+                                    v.push(m);
+                                    Arc::new(v)
+                                }
+                                None => stack.clone(),
+                            };
+                        let walker_tx = self.tx.clone();
+                        let walker_global = self.global.clone();
+                        let eng = self.eng;
+                        let light = self.light;
+                        scope.spawn(move |s| {
+                            let child = Walker {
+                                eng,
+                                global: walker_global,
+                                tx: walker_tx,
+                                light,
+                            };
+                            child.visit(s, path, child_rel, child_depth, child_stack);
+                        });
+                    }
+                }
+            }
+        }
+        self.flush(&mut out);
     }
 }
 
@@ -451,5 +724,3 @@ pub fn ensure_walk_root_exists(engine: &Engine) -> Result<(), String> {
         ))
     }
 }
-
-pub fn _unused(_p: &Path) {}

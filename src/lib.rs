@@ -73,18 +73,106 @@ pub fn scan_sync(patterns: Vec<String>, options_json: Option<String>) -> Result<
     Ok(eng.collect().into_iter().map(NativeEntry::from).collect())
 }
 
-/// Fast path: matching relative paths as plain strings, no entry objects.
+/// Fast path: matching relative paths as ONE NUL-joined string. A single
+/// string crosses the N-API boundary (instead of one marshalled JS string
+/// per path) and JS splits it — measurably the cheapest transport at 10k+
+/// entries. NUL cannot appear in a filesystem path.
 #[napi]
-pub fn scan_paths_sync(patterns: Vec<String>, options_json: Option<String>) -> Result<Vec<String>> {
+pub fn scan_paths_sync(patterns: Vec<String>, options_json: Option<String>) -> Result<String> {
     let eng = build_engine(patterns, options_json)?;
-    Ok(eng.collect_paths())
+    Ok(eng.collect_paths().join("\0"))
 }
 
-/// Streaming scanner. The parallel walker runs on a background Rust thread;
-/// `next_batch` pulls up to `max` entries at a time from its channel.
+/// Columnar transport: string fields cross as NUL-joined mega-strings,
+/// numeric fields as little-endian f64 bytes (read back via Float64Array),
+/// flags as bytes. The JS side zips columns into Entry objects in a tight
+/// loop — far cheaper than per-object native marshaling.
+#[napi(object)]
+pub struct NativeColumns {
+    pub count: u32,
+    pub paths: String,
+    pub relative_paths: String,
+    pub names: String,
+    pub extensions: String,
+    /// Interleaved [size, modified_ms] f64 LE bytes, 2 per entry.
+    /// (Buffer, not Vec<u8> — napi-rs would marshal Vec<u8> as a JS array
+    /// of individual numbers, which is catastrophically slow at scale.)
+    pub numbers: Buffer,
+    pub flags: Buffer, // bit 0: is_file, bit 1: is_dir
+    /// Per-entry contents (empty string when absent). Only populated when
+    /// at least one entry has content; contents are NOT NUL-joined because
+    /// file content may itself contain NUL bytes.
+    pub contents: Vec<String>,
+    pub has_content: Buffer,
+}
+
+fn join_into(buf: &mut String, s: &str, idx: usize) {
+    if idx > 0 {
+        buf.push('\0');
+    }
+    buf.push_str(s);
+}
+
+#[napi]
+pub fn scan_columns_sync(
+    patterns: Vec<String>,
+    options_json: Option<String>,
+) -> Result<NativeColumns> {
+    let eng = build_engine(patterns, options_json)?;
+    let entries = eng.collect();
+    let n = entries.len();
+    let mut cols = NativeColumns {
+        count: n as u32,
+        paths: String::new(),
+        relative_paths: String::new(),
+        names: String::new(),
+        extensions: String::new(),
+        numbers: Vec::with_capacity(n * 16).into(),
+        flags: Vec::with_capacity(n).into(),
+        contents: Vec::new(),
+        has_content: Vec::new().into(),
+    };
+    let any_content = entries.iter().any(|e| e.content.is_some());
+    let mut numbers: Vec<u8> = Vec::with_capacity(n * 16);
+    let mut flags: Vec<u8> = Vec::with_capacity(n);
+    let mut has_content: Vec<u8> = Vec::new();
+    if any_content {
+        has_content = Vec::with_capacity(n);
+    }
+    for (i, e) in entries.into_iter().enumerate() {
+        join_into(&mut cols.paths, &e.path, i);
+        join_into(&mut cols.relative_paths, &e.relative_path, i);
+        join_into(&mut cols.names, &e.name, i);
+        join_into(&mut cols.extensions, &e.extension, i);
+        numbers.extend_from_slice(&(e.size as f64).to_le_bytes());
+        numbers.extend_from_slice(&(e.modified_ms as f64).to_le_bytes());
+        flags.push((e.is_file as u8) | ((e.is_dir as u8) << 1));
+        if any_content {
+            match e.content {
+                Some(c) => {
+                    cols.contents.push(c);
+                    has_content.push(1);
+                }
+                None => {
+                    cols.contents.push(String::new());
+                    has_content.push(0);
+                }
+            }
+        }
+    }
+    cols.numbers = numbers.into();
+    cols.flags = flags.into();
+    cols.has_content = has_content.into();
+    Ok(cols)
+}
+
+/// Streaming scanner. The parallel walker runs on a background Rust thread
+/// and sends batches over a crossbeam channel; `next_batch` pulls up to
+/// `max` entries at a time from the local buffer.
 #[napi]
 pub struct Scanner {
-    rx: Arc<Mutex<Option<std::sync::mpsc::Receiver<engine::Entry>>>>,
+    rx: Arc<Mutex<Option<crossbeam_channel::Receiver<Vec<engine::Entry>>>>>,
+    buffer: Arc<Mutex<std::collections::VecDeque<engine::Entry>>>,
     finished: Arc<AtomicBool>,
 }
 
@@ -94,44 +182,58 @@ impl Scanner {
     /// means the traversal has finished and the channel is drained.
     #[napi]
     pub fn next_batch(&self, max: Option<u32>) -> NativeBatch {
-        let max = max.unwrap_or(128).max(1) as usize;
-        if self.finished.load(Ordering::SeqCst) {
-            return NativeBatch {
-                entries: Vec::new(),
-                done: true,
-            };
-        }
+        let max = max.unwrap_or(256).max(1) as usize;
         let mut entries: Vec<NativeEntry> = Vec::with_capacity(max);
-        let mut done = false;
         {
+            let mut buffer = self.buffer.lock().unwrap();
+            while entries.len() < max {
+                if let Some(e) = buffer.pop_front() {
+                    entries.push(NativeEntry::from(e));
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut done = false;
+        if entries.is_empty() && !self.finished.load(Ordering::SeqCst) {
+            // Buffer empty: wait briefly for the next walker batch.
             let guard = self.rx.lock().unwrap();
             if let Some(rx) = guard.as_ref() {
-                for i in 0..max {
-                    let timeout = if i == 0 {
-                        std::time::Duration::from_millis(50)
-                    } else {
-                        std::time::Duration::from_millis(2)
-                    };
-                    match rx.recv_timeout(timeout) {
-                        Ok(e) => entries.push(NativeEntry::from(e)),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                            done = true;
-                            break;
+                match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(batch) => {
+                        let mut buffer = self.buffer.lock().unwrap();
+                        for e in batch {
+                            buffer.push_back(e);
                         }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        done = true;
                     }
                 }
             } else {
                 done = true;
             }
+            // Drain whatever just arrived.
+            let mut buffer = self.buffer.lock().unwrap();
+            while entries.len() < max {
+                match buffer.pop_front() {
+                    Some(e) => entries.push(NativeEntry::from(e)),
+                    None => break,
+                }
+            }
+            if done && entries.is_empty() {
+                self.finished.store(true, Ordering::SeqCst);
+            }
         }
-        if done {
-            self.finished.store(true, Ordering::SeqCst);
+        if self.finished.load(Ordering::SeqCst) && entries.is_empty() {
+            done = true;
         }
         NativeBatch { entries, done }
     }
 
-    /// Stop the scan early. Dropping the receiver makes walker visitors quit.
+    /// Stop the scan early. Dropping the receiver makes walker sends fail
+    /// and the traversal winds down.
     #[napi]
     pub fn close(&self) {
         let mut guard = self.rx.lock().unwrap();
@@ -144,12 +246,13 @@ impl Scanner {
 #[napi]
 pub fn create_scanner(patterns: Vec<String>, options_json: Option<String>) -> Result<Scanner> {
     let eng = build_engine(patterns, options_json)?;
-    let (tx, rx) = std::sync::mpsc::channel::<engine::Entry>();
+    let (tx, rx) = crossbeam_channel::unbounded::<Vec<engine::Entry>>();
     std::thread::spawn(move || {
-        eng.run(tx);
+        eng.run_batched(tx, false);
     });
     Ok(Scanner {
         rx: Arc::new(Mutex::new(Some(rx))),
+        buffer: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         finished: Arc::new(AtomicBool::new(false)),
     })
 }
@@ -171,3 +274,4 @@ pub fn parse_query_json(input: String) -> Result<String> {
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
+

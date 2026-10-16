@@ -17,7 +17,7 @@ npm install hyperglob   # (source build: cargo + Node 18+)
 npm run build           # compiles the Rust core and stages the .node addon
 ```
 
-Prebuilt binaries are a roadmap item; v0.1.0 builds from source with a stable Rust toolchain.
+Prebuilt binaries are a roadmap item; current releases build from source with a stable Rust toolchain.
 
 ## API
 
@@ -112,25 +112,35 @@ Native, no manual exclusion rules: `.gitignore`, `.ignore`, `.git/info/exclude`,
                        OS File System
 ```
 
-- **Parallel walk** — `ignore::WalkParallel` fans traversal across threads (`threads` option, 0 = auto). Walk roots are narrowed to each pattern's static prefix, so `src/**/*.ts` never touches the rest of the tree.
-- **In-flight selectors** — metadata selectors evaluate at stat time; content selectors read and test the file *inside the walker thread*. Files are filtered before they ever cross the N-API boundary.
-- **Streaming delivery** — for the async API the walker runs on a background Rust thread and feeds a channel; JavaScript pulls batches of entries (`Scanner::next_batch`), so results are allocated on the Rust side and cross the boundary in small chunks instead of one giant array.
+- **Parallel walk** — a custom rayon work-stealing traversal over `read_dir` (`threads` option, 0 = auto); per-entry classification, ignore checks, matching and selector evaluation fan out across threads for wide directories. Walk roots are narrowed to each pattern's static prefix, so `src/**/*.ts` never touches the rest of the tree. (v0.1.x used the `ignore` crate's walker; it measured ~3x slower than raw readdir. The `ignore` crate's `Gitignore` matcher still powers the ignore stack.)
+- **In-flight selectors** — metadata selectors evaluate at stat time; content selectors read and test the file *inside the traversal tasks*. Files are filtered before they ever cross the N-API boundary. Files are only stat-ed when stats were requested or a metadata selector needs the values.
+- **Streaming delivery** — for the async API the walker runs on a background Rust thread and feeds a crossbeam channel in batches; JavaScript pulls batches of entries (`Scanner::next_batch`), so results are allocated on the Rust side and cross the boundary in small chunks instead of one giant array.
+- **Columnar sync transport** — `hyperglobSync` moves fields across the boundary as parallel columns (NUL-joined strings, byte-packed `Float64` columns, flag bytes) and zips them into `Entry` objects in JS; `modified`/`buffer` are lazy prototype getters so 10k+ `Date`/`Buffer` objects are never built unless touched.
 - **Compiled matching** — all patterns (plus their `/**/` zero-directory variants) compile once into a `GlobSet`; per-file matching is a set lookup, not a recursive string match.
 
 ## Benchmarks
 
-Measured, not targeted. Reproduce with `npm run bench` (22k-file synthetic tree, 5 runs, median) — numbers below are from a 2-core Linux VM with an overlay filesystem, warm cache; your hardware will differ.
+Measured, not targeted. Reproduce with `npm run bench`. Methodology: synthetic trees (22k and 110k files), 2 warmups, then 7 **interleaved** rounds per head-to-head (engines alternate running order so transient load hits both), reporting median and min. Numbers below are from a noisy shared 2-core Linux VM with an overlay filesystem — absolute values will be far better on real hardware; the *ratios* are the point.
 
-| Scenario | hyperglob | fast-glob |
-| --- | --- | --- |
-| Path + content query (`:contains`, single pass) vs glob + `readFile` + `includes` | **~294 ms** | ~4,144 ms |
-| Plain glob `src/**/*.ts`, entries + stats | ~322 ms | ~75 ms (paths only, no stats) |
-| Plain glob `src/**/*.ts`, `pathsOnly` | ~156 ms | ~75 ms |
-| Full scan `**/*.ts` with gitignore, `pathsOnly` | ~160 ms | ~56 ms (with a manual ignore list — fast-glob has no native `.gitignore`) |
-| 100k files, `pathsOnly` (best of 3) | ~1.53 s | — |
-| 100k files, `:contains` single pass (best of 3) | ~1.87 s | — |
+**22k-file tree, `src/**/*.ts` (13,336 matches), medians:**
 
-**Honest read:** hyperglob's reason to exist is the combined query — path + content + metadata + ignores in one pass — where it measured **~14x faster** than the fast-glob + read-it-yourself pipeline on this machine. For pure path listing with no selectors, fast-glob/fdir are still faster on this VM; closing that gap is the top performance roadmap item. The PRD's aspirational targets (<45 ms cold crawl at 100k files) are not met on this hardware by hyperglob *or* the incumbents — treat them as datacenter-hardware goals, not v0.1.0 measurements.
+| Scenario | hyperglob | fast-glob | |
+| --- | --- | --- | --- |
+| `pathsOnly` vs paths | **33.9 ms** | 52.1 ms | |
+| entries + stats (like-for-like) | **103.9 ms** | 345.5 ms | |
+| entries, `stats: false` | 50.8 ms | (paths: 52.1 ms) | |
+| Full scan `**/*.ts` w/ gitignore, `pathsOnly` | **33.4 ms** | 52.4 ms (manual ignore list) | |
+| Path + content `:contains` vs glob + `readFile` + `includes` | **253.9 ms** | 3,296.6 ms | **13x** |
+
+**110k-file tree, `src/**/*.ts` (66,668 matches), medians:**
+
+| Scenario | hyperglob | fast-glob | |
+| --- | --- | --- | --- |
+| `pathsOnly` vs paths | **237.4 ms** | 324.9 ms | |
+| entries + stats | **451.5 ms** | 1,263.0 ms | |
+| `:contains` single pass vs glob + read | **1,266.1 ms** | 15,518.3 ms | **12x** |
+
+hyperglob wins every head-to-head above on both median and min, including the plain-path rows that v0.1.x lost — the fixes were a custom rayon traversal (the `ignore` crate's walker was the bottleneck; its gitignore *matcher* is still used for rules), a columnar N-API transport (one NUL-joined string for paths, byte-packed numeric columns — per-object marshaling and `Vec<u8>`-as-array marshaling were both measured disasters), and never stat-ing files whose stats nobody asked for. The PRD's aspirational targets (<45 ms cold crawl at 100k files) are still not met on this hardware by hyperglob *or* the incumbents — treat them as datacenter-hardware goals.
 
 ## Options
 
@@ -155,10 +165,10 @@ Measured, not targeted. Reproduce with `npm run bench` (22k-file synthetic tree,
 - [x] Phase 2: N-API bindings — `hyperglob` / `hyperglobSync`, pull-based AsyncIterable streaming
 - [x] Phase 3: Selector parser — `:contains`, `:matches`, `:exports`, `:has-key`, `:size`, `:modified`; memchr byte search in Rust
 - [x] Phase 4: Benchmark suite — fast-glob / fdir / tinyglobby comparisons (`npm run bench`)
-- [ ] Full AST parsing via `oxc_parser` (v0.1.0's `:exports` is a light signature inspection, not a full parse)
+- [ ] Full AST parsing via `oxc_parser` (`:exports` is currently a light signature inspection, not a full parse)
 - [ ] True zero-copy buffers for `content` (currently Rust-allocated, streamed in batches; content strings are copied once across the boundary)
 - [ ] Prebuilt binaries for Linux/macOS/Windows (napi-rs CI matrix) — blocked locally on GitHub `workflow` token scope
-- [ ] Plain-path scan performance pass (custom readdir pipeline vs the `ignore` walker)
+- [x] Plain-path performance pass (v0.2.0: custom rayon traversal + columnar transport — hyperglob now wins the plain-glob rows too, see Benchmarks)
 
 ## Development
 
