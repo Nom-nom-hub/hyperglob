@@ -68,7 +68,22 @@ tryRegister(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_
   return true;
 });
 
-tryRegister(path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'), (cfg) => {
+// Continue
+tryRegister(path.join(home, '.continue', 'config.json'), (cfg) => {
+  cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers.hyperglob) return false;
+  cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
+  return true;
+});
+
+// Cline (VS Code global storage)
+tryRegister(path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'), (cfg) => {
+  cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers.hyperglob) return false;
+  cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
+  return true;
+});
+
   cfg.mcpServers = cfg.mcpServers || {};
   if (cfg.mcpServers.hyperglob) return false;
   cfg.mcpServers.hyperglob = { command: 'node', args: [path.join(__dirname, '..', 'mcp.js')] };
