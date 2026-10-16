@@ -19,18 +19,24 @@ const file = nativeFilename();
 if (!file) { console.warn('hyperglob: unsupported platform ' + process.platform + '-' + process.arch); process.exit(0); }
 const dest = path.join(__dirname, '..', file);
 if (!fs.existsSync(dest)) {
+  const download = (u, redirects) => {
+    if (redirects > 5) { console.warn('hyperglob: too many redirects'); process.exit(0); }
+    https.get(u, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        download(res.headers.location, redirects + 1);
+        return;
+      }
+      if (res.statusCode !== 200) { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: no prebuilt binary on releases; run npm run build (cargo). status=' + res.statusCode); process.exit(0); return; }
+      const f = fs.createWriteStream(dest);
+      res.pipe(f);
+      f.on('finish', () => { console.log('hyperglob: binary installed.'); });
+      f.on('error', (e) => { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: write failed: ' + e.message); process.exit(0); });
+    }).on('error', (e) => { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: download failed: ' + e.message); process.exit(0); });
+  };
   const url = 'https://github.com/Nom-nom-hub/hyperglob/releases/latest/download/' + file;
   console.log('hyperglob: downloading prebuilt binary for ' + process.platform + '-' + process.arch + '...');
-  const f = fs.createWriteStream(dest);
-  https.get(url, (res) => {
-    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-      https.get(res.headers.location, (r2) => { r2.pipe(f); r2.on('end', ()=>{ f.close(); console.log('hyperglob: binary installed.'); }); }).on('error', e=>{ try{fs.unlinkSync(dest);}catch{} console.warn('hyperglob: download failed: ' + e.message); process.exit(0); });
-      return;
-    }
-    if (res.statusCode !== 200) { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: no prebuilt binary on releases; run npm run build (cargo). status=' + res.statusCode); process.exit(0); }
-    res.pipe(f);
-    res.on('end', ()=>{ f.close(); console.log('hyperglob: binary installed.'); });
-  }).on('error', (e) => { try { fs.unlinkSync(dest); } catch {} console.warn('hyperglob: download failed: ' + e.message); process.exit(0); });
+  download(url, 0);
 }
 
 const bin = path.join(__dirname, '..', 'mcp.js');
