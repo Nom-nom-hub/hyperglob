@@ -53,7 +53,7 @@ test.after(() => {
 const rels = (entries) => entries.map((e) => e.relativePath).sort();
 
 test('version is exposed', () => {
-  assert.equal(version(), '0.1.0');
+  assert.equal(version(), '0.1.1');
 });
 
 test('parseQuery parses PRD syntax', () => {
