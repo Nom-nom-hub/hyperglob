@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 name = "hyperglob"
 
 [dependencies]
-napi = { version = "2", default-features = false, features = ["napi8"] }
+napi = { version = "=3.12.4", default-features = false, features = ["napi8"] }
 napi-derive = "2"
 ignore = "0.4"
 globset = "0.4"
