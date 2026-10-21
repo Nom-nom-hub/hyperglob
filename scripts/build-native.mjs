@@ -149,7 +149,23 @@ const dest = path.join(root, targetName());
 if (!fs.existsSync(src)) {
   throw new Error('cargo did not produce ' + src);
 }
-fs.copyFileSync(src, dest);
+try {
+  fs.copyFileSync(src, dest);
+} catch (error) {
+  // On Windows a loaded native module cannot be overwritten. The usual
+  // culprit is a running hyperglob MCP server, which holds the binding
+  // open for its whole lifetime. Say so plainly instead of surfacing a
+  // bare EBUSY.
+  if (error.code === 'EBUSY' || error.code === 'EPERM') {
+    throw new Error(
+      `could not replace ${path.basename(dest)}: the file is in use.\n` +
+        'A running hyperglob MCP server keeps the native binding open, so it\n' +
+        'has to be stopped before the binding can be replaced. Stop the agent\n' +
+        '(or the MCP server) and run this command again.'
+    );
+  }
+  throw error;
+}
 console.log(
   `hyperglob: staged ${path.basename(dest)}` +
   (triple ? ` (cross-compiled for ${triple})` : '') +

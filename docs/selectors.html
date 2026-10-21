@@ -121,10 +121,27 @@ evaluated <strong>in flight</strong>, during the traversal:</p>
 <p>Literal byte-substring search over the whole file (memchr's <code>memmem</code>).</p>
 <div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(&quot;useServerHook&quot;)', { pathsOnly: true });
 // -&gt; ['src/app.ts', 'src/hooks/useServer.ts']</code></pre></div>
-<div class="table-wrap"><table><thead><tr><th style="text-align:left">Form</th><th style="text-align:left">Behavior</th></tr></thead><tbody><tr><td style="text-align:left"><code>:contains(&quot;text&quot;)</code></td><td style="text-align:left">Literal substring.</td></tr><tr><td style="text-align:left"><code>:contains('text')</code></td><td style="text-align:left">Same, single quotes.</td></tr><tr><td style="text-align:left"><code>:contains(/regex/)</code></td><td style="text-align:left">Regex search.</td></tr><tr><td style="text-align:left"><code>:contains(&quot;regex:...&quot;)</code></td><td style="text-align:left">Regex search, spelled with a prefix.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Form</th><th style="text-align:left">Behavior</th></tr></thead><tbody><tr><td style="text-align:left"><code>:contains(&quot;text&quot;)</code></td><td style="text-align:left">Literal substring.</td></tr><tr><td style="text-align:left"><code>:contains('text')</code></td><td style="text-align:left">Same, single quotes.</td></tr><tr><td style="text-align:left"><code>:contains(/regex/)</code></td><td style="text-align:left">Regex search.</td></tr><tr><td style="text-align:left"><code>:contains(/regex/flags)</code></td><td style="text-align:left">Regex search, with flags.</td></tr><tr><td style="text-align:left"><code>:contains(&quot;regex:...&quot;)</code></td><td style="text-align:left">Regex search, spelled with a prefix.</td></tr></tbody></table></div>
 <p>The argument is unquoted before matching, so <code>\&quot;</code> and <code>\'</code> inside a quoted
 argument become literal quote characters.</p>
 <p>An empty needle matches nothing.</p>
+<h4 id="regex-flags">Regex flags<a class="anchor" href="#regex-flags" aria-label="Permalink to this section">#</a></h4>
+<p>The pattern runs to the <strong>last</strong> slash and everything after it is the flag
+set, which is the JavaScript regex-literal convention:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(/useServerHook/i)');
+// case-insensitive</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Flag</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>i</code></td><td style="text-align:left">Case-insensitive.</td></tr><tr><td style="text-align:left"><code>m</code></td><td style="text-align:left"><code>^</code> and <code>$</code> match at line boundaries.</td></tr><tr><td style="text-align:left"><code>s</code></td><td style="text-align:left"><code>.</code> also matches a newline.</td></tr><tr><td style="text-align:left"><code>U</code></td><td style="text-align:left">Swap greedy and lazy quantifiers.</td></tr><tr><td style="text-align:left"><code>x</code></td><td style="text-align:left">Ignore whitespace in the pattern.</td></tr><tr><td style="text-align:left"><code>u</code></td><td style="text-align:left">Accepted for JavaScript compatibility; Unicode is always on.</td></tr></tbody></table></div>
+<p>A trailing segment that is not made only of flag characters is not a flag
+set, so the argument is a <strong>literal</strong> — that is what keeps a path-like
+argument working:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('**/*.ts :contains(/usr/bin)');   // literal &quot;/usr/bin&quot;
+hyperglobSync('**/*.ts :contains(/usr/bin/i)'); // flags &quot;bin&quot; -&gt; not a flag set
+//                                                     -&gt; literal &quot;/usr/bin/i&quot;</code></pre></div>
+<p>Quote the argument if the text itself ends in a slash and you mean it
+literally, or use the <code>regex:</code> prefix when you need a pattern that
+contains slashes:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('**/*.ts :contains(&quot;regex:a/b/c)&quot;)'); // regex &quot;a/b/c&quot;</code></pre></div>
+<p>The same flags work in <code>:matches(...)</code> and its <code>:regex(...)</code> alias.</p>
 <p><strong>Correct:</strong></p>
 <div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(&quot;export const&quot;)');</code></pre></div>
 <p><strong>Incorrect — the regex form needs slashes (or the <code>regex:</code> prefix); a plain
@@ -136,6 +153,8 @@ hyperglobSync('src/**/*.ts :contains(use(Server|Client)Hook)');    // literal �
 <p>Regex byte search over the whole file. Identical to <code>:contains(/regex/)</code>;
 <code>:regex(...)</code> is accepted as an alias.</p>
 <div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :matches(&quot;use(Server|Client)Hook&quot;)', { pathsOnly: true });</code></pre></div>
+<p>Flags work here too, in the same <code>/pattern/flags</code> form:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :matches(/useServerHook/i)', { pathsOnly: true });</code></pre></div>
 <p><code>:matches</code> is a <em>text</em> search. It cannot tell an export from a comment — use
 <code>:exports</code> for that.</p>
 <p><strong>Correct:</strong></p>

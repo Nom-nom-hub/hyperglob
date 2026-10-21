@@ -95,6 +95,34 @@ test(':contains with regex', () => {
   assert.deepEqual(out, ['src/app.test.ts', 'src/index.ts']);
 });
 
+test(':contains applies regex flags instead of matching them literally', () => {
+  // A `/pattern/flags` argument is a regex with those flags. Before the
+  // flags were supported this silently became a literal search for the
+  // text "/useServerHook/i" and matched nothing.
+  const insensitive = rels(
+    hyperglobSync('src/**/*.ts :contains(/USESERVERHOOK/i)', { cwd: root })
+  );
+  assert.deepEqual(insensitive, ['src/app.test.ts', 'src/index.ts']);
+
+  // Without the flag the same pattern is case-sensitive and matches
+  // nothing.
+  const sensitive = rels(hyperglobSync('src/**/*.ts :contains(/USESERVERHOOK/)', { cwd: root }));
+  assert.deepEqual(sensitive, []);
+});
+
+test(':matches applies regex flags', () => {
+  const out = rels(hyperglobSync('src/**/*.ts :matches(/USESERVERHOOK/i)', { cwd: root }));
+  assert.deepEqual(out, ['src/app.test.ts', 'src/index.ts']);
+});
+
+test('a path-like :contains argument stays a literal', () => {
+  // "/usr/bin" is not a flag set, so it is matched as the text itself.
+  const out = rels(hyperglobSync('src/**/*.ts :contains(/usr/bin)', { cwd: root }));
+  assert.deepEqual(out, []);
+  const quoted = rels(hyperglobSync('src/**/*.ts :contains("/usr/bin")', { cwd: root }));
+  assert.deepEqual(quoted, []);
+});
+
 test(':exports matches real export signatures, not strings', () => {
   const out = rels(hyperglobSync('src/**/*.ts :exports("useServerHook")', { cwd: root }));
   assert.deepEqual(out, ['src/app.test.ts', 'src/index.ts']);

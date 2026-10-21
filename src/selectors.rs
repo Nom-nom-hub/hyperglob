@@ -6,6 +6,7 @@
 //! Supported selectors:
 //!   :contains("literal")      byte substring search (memchr::memmem)
 //!   :contains(/regex/)        regex byte search
+//!   :contains(/regex/flags)   regex byte search, with flags (i m s U x)
 //!   :matches("regex")         regex byte search
 //!   :exports(name)            full AST export check (oxc_parser) for JS/TS files,
 //!                             regex signature fallback for other/unparseable files
@@ -14,7 +15,7 @@
 //!   :size(<100kb)             metadata filter, ops < <= > >= = ; units b/kb/mb/gb/kib/mib/gib
 //!   :modified(>2026-10-01)    metadata filter on mtime (UTC), ops as above
 
-use regex::bytes::Regex;
+use regex::bytes::{Regex, RegexBuilder};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -605,11 +606,82 @@ fn tokenize(input: &str) -> Vec<String> {
     tokens
 }
 
+/// A selector argument, parsed from the text the user wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SelectorArg {
+    /// A plain literal, matched byte-exact.
+    Plain(String),
+    /// A regular expression, with the flag characters written after it.
+    Regex { pattern: String, flags: String },
+}
+
+impl SelectorArg {
+    /// The argument as plain text. A regular expression contributes its
+    /// pattern, without its flags.
+    fn as_plain(&self) -> &str {
+        match self {
+            SelectorArg::Plain(s) => s,
+            SelectorArg::Regex { pattern, .. } => pattern,
+        }
+    }
+}
+
+/// The flag characters accepted after the closing slash of a
+/// `/pattern/flags` regular expression.
+///
+/// `u` is accepted for compatibility with JavaScript regex literals; the
+/// regex crate is always Unicode, so it changes nothing.
+const REGEX_FLAG_CHARS: &str = "imsUxu";
+
+/// Split a `/pattern/flags` argument into its pattern and its flags.
+///
+/// The pattern runs to the LAST slash and everything after it is the flag
+/// set, which is the JavaScript regex-literal convention. A trailing
+/// segment that is not made only of flag characters is not a flag set, so
+/// the argument is not a regular expression at all -- which keeps
+/// path-like literals such as `/usr/bin` working.
+fn split_regex_arg(s: &str) -> Option<(String, String)> {
+    if !s.starts_with('/') {
+        return None;
+    }
+    let close = s.rfind('/')?;
+    if close == 0 {
+        // A lone "/" is not a regex.
+        return None;
+    }
+    let pattern = &s[1..close];
+    let flags = &s[close + 1..];
+    if !flags.chars().all(|c| REGEX_FLAG_CHARS.contains(c)) {
+        return None;
+    }
+    // `\/` is not a valid escape in the regex crate, but it is the
+    // conventional way to write a slash inside a regex literal.
+    Some((pattern.replace("\\/", "/"), flags.to_string()))
+}
+
+/// Build a regex from a pattern and its flag characters.
+fn build_regex(pattern: &str, flags: &str, context: &str) -> Result<Regex, String> {
+    RegexBuilder::new(pattern)
+        .case_insensitive(flags.contains('i'))
+        .multi_line(flags.contains('m'))
+        .dot_matches_new_line(flags.contains('s'))
+        .swap_greed(flags.contains('U'))
+        .ignore_whitespace(flags.contains('x'))
+        .build()
+        .map_err(|e| format!("bad regex in {context}: {e}"))
+}
+
 /// Strip surrounding quotes (or /regex/ slashes) from a selector argument.
-fn unquote(raw: &str) -> (String, bool) {
+fn unquote(raw: &str) -> SelectorArg {
     let s = raw.trim();
-    if s.len() >= 2 && s.starts_with('/') && s.ends_with('/') {
-        return (s[1..s.len() - 1].to_string(), true);
+    if let Some((pattern, flags)) = split_regex_arg(s) {
+        return SelectorArg::Regex { pattern, flags };
+    }
+    if let Some(rest) = s.strip_prefix("regex:") {
+        return SelectorArg::Regex {
+            pattern: rest.to_string(),
+            flags: String::new(),
+        };
     }
     if s.len() >= 2
         && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
@@ -619,9 +691,9 @@ fn unquote(raw: &str) -> (String, bool) {
             .replace("\\\"", "\"")
             .replace("\\'", "'")
             .replace("\\\\", "\\");
-        return (unescaped, false);
+        return SelectorArg::Plain(unescaped);
     }
-    (s.to_string(), false)
+    SelectorArg::Plain(s.to_string())
 }
 
 fn parse_op(s: &str) -> Result<(CmpOp, &str), String> {
@@ -747,23 +819,29 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
     let name = &body[..open];
     let arg_raw = &body[open + 1..body.len() - 1];
     match name {
-        "contains" => {
-            let (arg, is_slashes) = unquote(arg_raw);
-            if is_slashes || arg.starts_with("regex:") {
-                let pat = arg.strip_prefix("regex:").unwrap_or(&arg);
-                let re = Regex::new(pat).map_err(|e| format!("bad regex in :contains: {e}"))?;
-                Ok(Selector::ContainsRegex(re))
-            } else {
-                Ok(Selector::ContainsLiteral(arg.into_bytes()))
-            }
-        }
+        "contains" => match unquote(arg_raw) {
+            SelectorArg::Regex { pattern, flags } => Ok(Selector::ContainsRegex(build_regex(
+                &pattern,
+                &flags,
+                ":contains",
+            )?)),
+            SelectorArg::Plain(arg) => Ok(Selector::ContainsLiteral(arg.into_bytes())),
+        },
         "matches" | "regex" => {
-            let (arg, _) = unquote(arg_raw);
-            let re = Regex::new(&arg).map_err(|e| format!("bad regex in :{name}: {e}"))?;
-            Ok(Selector::ContainsRegex(re))
+            let arg = unquote(arg_raw);
+            let (pattern, flags) = match arg {
+                SelectorArg::Regex { pattern, flags } => (pattern, flags),
+                SelectorArg::Plain(s) => (s, String::new()),
+            };
+            Ok(Selector::ContainsRegex(build_regex(
+                &pattern,
+                &flags,
+                &format!(":{name}"),
+            )?))
         }
         "exports" | "export" => {
-            let (arg, _) = unquote(arg_raw);
+            let arg = unquote(arg_raw);
+            let arg = arg.as_plain().to_string();
             if arg.is_empty() {
                 return Err("empty name in :exports".to_string());
             }
@@ -773,7 +851,8 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
             Ok(Selector::Exports(arg))
         }
         "imports" | "import" => {
-            let (arg, _) = unquote(arg_raw);
+            let arg = unquote(arg_raw);
+            let arg = arg.as_plain().to_string();
             if arg.is_empty() {
                 return Err("empty name in :imports".to_string());
             }
@@ -781,7 +860,8 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
             Ok(Selector::Imports(arg))
         }
         "has-key" | "haskey" | "hasKey" => {
-            let (arg, _) = unquote(arg_raw);
+            let arg = unquote(arg_raw);
+            let arg = arg.as_plain().to_string();
             let path: Vec<String> = arg.split('.').map(|s| s.to_string()).collect();
             if path.iter().any(|s| s.is_empty()) {
                 return Err(format!("invalid key path in :has-key: {arg}"));
@@ -793,7 +873,8 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
             Ok(Selector::Size(op, parse_size(rest)?))
         }
         "modified" | "mtime" => {
-            let (arg, _) = unquote(arg_raw);
+            let arg = unquote(arg_raw);
+            let arg = arg.as_plain().to_string();
             let (op, rest) = parse_op(arg.trim())?;
             Ok(Selector::Modified(op, parse_date_ms(rest)?))
         }
@@ -858,6 +939,80 @@ mod tests {
         assert_eq!(q.patterns, vec!["src/**/*.ts".to_string()]);
         assert_eq!(q.selectors.len(), 1);
         assert!(matches!(q.selectors[0], Selector::ContainsLiteral(_)));
+    }
+
+    #[test]
+    fn regex_flags_are_applied() {
+        // A `/pattern/flags` argument is a regular expression with those
+        // flags -- not a literal search for the text "/pattern/flags".
+        let q = parse_query(r#"src/**/* :contains(/hyperglob/i)"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsRegex(re) => {
+                assert!(re.is_match(b"Hyperglob"));
+                assert!(re.is_match(b"hyperglob"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn regex_flags_default_to_case_sensitive() {
+        let q = parse_query(r#"src/**/* :contains(/hyperglob/)"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsRegex(re) => {
+                assert!(re.is_match(b"hyperglob"));
+                assert!(!re.is_match(b"Hyperglob"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn matches_also_honors_regex_flags() {
+        let q = parse_query(r#"src/**/* :matches(/hyperglob/i)"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsRegex(re) => assert!(re.is_match(b"Hyperglob")),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_path_like_argument_stays_a_literal() {
+        // "/usr/bin" is not a flag set, so it is a literal -- the same
+        // answer it has always given.
+        let q = parse_query(r#"src/**/* :contains(/usr/bin)"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsLiteral(b) => assert_eq!(b, b"/usr/bin"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_quoted_path_stays_a_literal() {
+        let q = parse_query(r#"src/**/* :contains("/usr/bin")"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsLiteral(b) => assert_eq!(b, b"/usr/bin"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_slash_in_the_pattern_is_kept() {
+        // The pattern runs to the LAST slash, so a pattern may contain one.
+        let q = parse_query(r#"src/**/* :contains(/a/b/)"#).unwrap();
+        match &q.selectors[0] {
+            Selector::ContainsRegex(re) => {
+                assert!(re.is_match(b"xa/bx"));
+                assert!(!re.is_match(b"xax"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bad_regex_is_reported() {
+        let err = parse_query(r#"src/**/* :contains(/[unclosed/)"#).unwrap_err();
+        assert!(err.contains("bad regex"), "unexpected error: {err}");
     }
 
     #[test]

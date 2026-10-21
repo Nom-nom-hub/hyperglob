@@ -83,7 +83,7 @@ npx hyperglob 'src/**/*.ts :exports("useServerHook")' --json
 | Syntax | Behavior |
 | --- | --- |
 | `src/**/*.ts` | Standard fast multi-threaded glob. |
-| `src/**/*.ts :contains("export const")` | Only files whose content contains the literal (evaluated in Rust during the crawl). `:contains(/regex/)` and `:matches("regex")` run a regex byte search. |
+| `src/**/*.ts :contains("export const")` | Only files whose content contains the literal (evaluated in Rust during the crawl). `:contains(/regex/)` and `:matches("regex")` run a regex byte search, with optional flags in the `:contains(/regex/i)` form. |
 | `src/**/*.ts :exports("useServerHook")` | **AST check** (oxc parser): the module really exports that name — any form: declarations, `export { a as b }`, re-exports, default exports. Export-shaped text inside comments or string literals does **not** match. (A file that fails to parse, or has a non-JS/TS extension, falls back to a regex over a comment- and string-masked copy of the source — the traps still do not match.) |
 | `src/**/*.ts :imports("react")` | AST check: the module depends on `react` (exact source or a subpath like `react/jsx-runtime`); `require()`, dynamic `import()`, and re-export (`export … from`) sources count too. |
 | `src/**/*.json :has-key("dependencies.react")` | Evaluates JSON structure in-flight during traversal (dotted path, array indices work). |

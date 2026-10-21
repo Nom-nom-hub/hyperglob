@@ -242,6 +242,23 @@ expect(
 );
 
 // ---------------------------------------------------------------------------
+// The regex flags: a `/pattern/flags` argument must be parsed as a
+// regular expression with those flags, not as a literal search for the
+// text "/pattern/flags". The docs must document them.
+// ---------------------------------------------------------------------------
+expect(
+  'the regex flag set is parsed',
+  /const REGEX_FLAG_CHARS/.test(selectorsRs) &&
+    /\.case_insensitive\(flags\.contains\('i'\)\)/.test(selectorsRs) &&
+    /fn split_regex_arg/.test(selectorsRs)
+);
+const selectorsMd = read('docs/selectors.md');
+expect(
+  'the docs document the regex flags',
+  /`:contains\(\/regex\/flags\)`/.test(selectorsMd) && /\| `i` \| Case-insensitive/.test(selectorsMd)
+);
+
+// ---------------------------------------------------------------------------
 // A version quoted in the docs must match the current version, or the
 // example is lying. A stale version number is worse than no example.
 // ---------------------------------------------------------------------------

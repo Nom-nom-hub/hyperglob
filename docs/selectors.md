@@ -182,12 +182,52 @@ hyperglobSync('src/**/*.ts :contains("useServerHook")', { pathsOnly: true });
 | `:contains("text")` | Literal substring. |
 | `:contains('text')` | Same, single quotes. |
 | `:contains(/regex/)` | Regex search. |
+| `:contains(/regex/flags)` | Regex search, with flags. |
 | `:contains("regex:...")` | Regex search, spelled with a prefix. |
 
 The argument is unquoted before matching, so `\"` and `\'` inside a quoted
 argument become literal quote characters.
 
 An empty needle matches nothing.
+
+#### Regex flags
+
+The pattern runs to the **last** slash and everything after it is the flag
+set, which is the JavaScript regex-literal convention:
+
+```js
+hyperglobSync('src/**/*.ts :contains(/useServerHook/i)');
+// case-insensitive
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `i` | Case-insensitive. |
+| `m` | `^` and `$` match at line boundaries. |
+| `s` | `.` also matches a newline. |
+| `U` | Swap greedy and lazy quantifiers. |
+| `x` | Ignore whitespace in the pattern. |
+| `u` | Accepted for JavaScript compatibility; Unicode is always on. |
+
+A trailing segment that is not made only of flag characters is not a flag
+set, so the argument is a **literal** — that is what keeps a path-like
+argument working:
+
+```js
+hyperglobSync('**/*.ts :contains(/usr/bin)');   // literal "/usr/bin"
+hyperglobSync('**/*.ts :contains(/usr/bin/i)'); // flags "bin" -> not a flag set
+//                                                     -> literal "/usr/bin/i"
+```
+
+Quote the argument if the text itself ends in a slash and you mean it
+literally, or use the `regex:` prefix when you need a pattern that
+contains slashes:
+
+```js
+hyperglobSync('**/*.ts :contains("regex:a/b/c)")'); // regex "a/b/c"
+```
+
+The same flags work in `:matches(...)` and its `:regex(...)` alias.
 
 **Correct:**
 
@@ -211,6 +251,12 @@ Regex byte search over the whole file. Identical to `:contains(/regex/)`;
 
 ```js
 hyperglobSync('src/**/*.ts :matches("use(Server|Client)Hook")', { pathsOnly: true });
+```
+
+Flags work here too, in the same `/pattern/flags` form:
+
+```js
+hyperglobSync('src/**/*.ts :matches(/useServerHook/i)', { pathsOnly: true });
 ```
 
 `:matches` is a *text* search. It cannot tell an export from a comment — use
