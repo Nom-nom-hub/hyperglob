@@ -19,8 +19,30 @@ function loadNative() {
     path.join(__dirname, file),
     path.join(__dirname, 'native', file),
   ];
+  const { assertValidNativeBinary } = require('./scripts/native-integrity.js');
+  let corrupt = null;
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).size > 0) return require(candidate);
+    if (!fs.existsSync(candidate)) continue;
+    // A truncated or corrupt binary must not be handed to process.dlopen:
+    // that throws ERR_DLOPEN_FAILED, which looks like a broken install but
+    // cannot be repaired by re-running the install (the file is already
+    // there, so the installer skips the download). Validate first, and
+    // remove a bad file so the next install can replace it.
+    const check = assertValidNativeBinary(candidate);
+    if (!check.ok) {
+      corrupt = corrupt || { candidate, reason: check.reason };
+      try {
+        fs.unlinkSync(candidate);
+      } catch {}
+      continue;
+    }
+    return require(candidate);
+  }
+  if (corrupt) {
+    throw new Error(
+      `hyperglob: native binding at ${corrupt.candidate} is corrupt (${corrupt.reason}). ` +
+        'It has been removed; re-run `npm install` or `npm run build` to restore it.'
+    );
   }
   throw new Error(
     `hyperglob: native binding not found (${file}). Run \`npm run build\` to compile the Rust core.`
@@ -55,8 +77,10 @@ function normalizeOptions(options) {
   if (options.gitignore !== undefined) out.gitignore = !!options.gitignore;
   if (options.ignoreFiles !== undefined) out.ignoreFiles = !!options.ignoreFiles;
   if (options.dot !== undefined) out.dot = !!options.dot;
-  if (options.maxDepth !== undefined && options.maxDepth !== null) out.maxDepth = options.maxDepth | 0;
-  if (options.threads !== undefined) out.threads = options.threads | 0;
+  if (options.maxDepth !== undefined && options.maxDepth !== null) {
+    out.maxDepth = requireNonNegativeInt(options.maxDepth, 'maxDepth');
+  }
+  if (options.threads !== undefined) out.threads = requireNonNegativeInt(options.threads, 'threads');
   if (options.stats !== undefined) out.stats = !!options.stats;
   if (options.onlyFiles !== undefined) out.onlyFiles = !!options.onlyFiles;
   if (options.followSymlinks !== undefined) out.followSymlinks = !!options.followSymlinks;
@@ -68,23 +92,39 @@ function normalizeOptions(options) {
   return out;
 }
 
+// Validate a non-negative integer option.
+//
+// `value | 0` silently turns NaN into 0 and truncates fractions, so a
+// typo like `maxDepth: 'abc'` would quietly return an empty result set
+// instead of reporting the mistake. Negative values are rejected too:
+// the native layer has no meaningful notion of "unlimited depth", and
+// letting one through produced a raw serde error.
+function requireNonNegativeInt(value, name) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new TypeError(
+      `hyperglob: ${name} must be a non-negative integer, got ${JSON.stringify(value)}`
+    );
+  }
+  return value;
+}
+
 function toEntry(raw, options) {
-  const entry = {
-    path: raw.path,
-    relativePath: raw.relativePath,
-    name: raw.name,
-    extension: raw.extension,
-    isFile: raw.isFile,
-    isDir: raw.isDir,
-  };
+  // Use the same class as the sync path so that both APIs expose the same
+  // shape: `modified` is a lazily-built Date, `buffer` is a lazily-built
+  // Buffer, and both are `undefined` when the scan ran with `stats:false`.
+  const entry = new HyperEntry();
+  entry.path = raw.path;
+  entry.relativePath = raw.relativePath;
+  entry.name = raw.name;
+  entry.extension = raw.extension;
+  entry.isFile = raw.isFile;
+  entry.isDir = raw.isDir;
   if (!options || options.stats !== false) {
     entry.size = raw.size;
-    entry.modified = new Date(raw.modifiedMs);
     entry.modifiedMs = raw.modifiedMs;
   }
   if (raw.content !== undefined && raw.content !== null) {
     entry.content = raw.content;
-    entry.buffer = Buffer.from(raw.content, 'utf8');
   }
   return entry;
 }
@@ -100,6 +140,12 @@ function scanRawSync(patterns, options) {
 // touch them. `modifiedMs` is always present as a plain number.
 class HyperEntry {
   get modified() {
+    // `modifiedMs` is absent when the scan ran with `stats: false`. In that
+    // case there is no date to report, and returning `new Date(undefined)`
+    // would hand back an Invalid Date — whose `toISOString()` throws.
+    // Returning `undefined` keeps the sync and streaming paths in agreement
+    // (the streaming path never sets `modified` at all).
+    if (this.modifiedMs === undefined || this.modifiedMs === null) return undefined;
     if (this._modified === undefined) {
       this._modified = new Date(this.modifiedMs);
     }
@@ -126,7 +172,8 @@ class HyperEntry {
     if (this.size !== undefined) {
       out.size = this.size;
       out.modifiedMs = this.modifiedMs;
-      out.modified = this.modified.toISOString();
+      const d = this.modified;
+      out.modified = d === undefined ? null : d.toISOString();
     }
     if (this.content !== undefined) out.content = this.content;
     return out;
@@ -223,9 +270,27 @@ class HyperglobStream {
 
   async *[Symbol.asyncIterator]() {
     if (this._options && this._options.pathsOnly) {
+      // Use the native paths-only scanner so the stream is genuinely
+      // incremental. The previous implementation ran a full synchronous
+      // scan and then split the result, materializing the whole result set
+      // before the first `yield`.
       const opts = normalizeOptions(this._options);
-      const joined = native.scanPathsSync(this._patterns, opts ? JSON.stringify(opts) : null);
-      for (const p of splitPaths(joined)) yield p;
+      const scanner = native.createPathsScanner(
+        this._patterns,
+        opts ? JSON.stringify(opts) : null
+      );
+      try {
+        for (;;) {
+          const batch = scanner.nextBatch(256);
+          for (const p of splitPaths(batch.paths)) yield p;
+          if (batch.done) break;
+          if (batch.paths === '') {
+            await new Promise((r) => setImmediate(r));
+          }
+        }
+      } finally {
+        try { scanner.close(); } catch (_) { /* already closed */ }
+      }
       return;
     }
     const scanner = this._open();
