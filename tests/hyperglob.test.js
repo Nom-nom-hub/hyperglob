@@ -53,7 +53,9 @@ test.after(() => {
 const rels = (entries) => entries.map((e) => e.relativePath).sort();
 
 test('version is exposed', () => {
-  assert.equal(version(), '0.4.0');
+  // The npm package version is the single source of truth; the native
+  // `version()` must agree with it (see docs/PACKAGING_AUDIT.md F8).
+  assert.equal(version(), require('../package.json').version);
 });
 
 test('parseQuery parses PRD syntax', () => {
@@ -333,9 +335,13 @@ test('native installation: missing or empty .node throws a clear, actionable err
   try {
     // Rename the real binary so loadNative finds nothing usable.
     if (fs.existsSync(nodePath)) fs.renameSync(nodePath, backup);
-    // Empty file must not be treated as valid either.
+    // Empty file must not be treated as valid either. It is reported as
+    // corrupt (and removed) rather than as "not found", because the file
+    // was present but unusable.
     fs.writeFileSync(nodePath, '');
-    assert.throws(() => loadNative(), /native binding not found/);
+    assert.throws(() => loadNative(), /native binding (not found|.*is corrupt)/);
+    // The unusable file is removed so a later install can replace it.
+    assert.ok(!fs.existsSync(nodePath), 'the corrupt binary should have been removed');
   } finally {
     try { fs.unlinkSync(nodePath); } catch {}
     if (fs.existsSync(backup)) fs.renameSync(backup, nodePath);
