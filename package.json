@@ -61,7 +61,7 @@
     "build": "node scripts/build-native.mjs",
     "build:debug": "node scripts/build-native.mjs --debug",
     "example": "node examples/prd-examples.js",
-    "test": "npm run build && node --test --experimental-test-isolation=none \"tests/*.test.js\"",
+    "test": "npm run build && node tools/run-tests.mjs",
     "bench:parity": "node bench/parity.mjs",
     "bench:real": "node bench/real-repo.mjs",
     "bench:check": "node bench/check-regression.mjs",

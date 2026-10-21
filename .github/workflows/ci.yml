@@ -51,7 +51,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22 has --experimental-test-isolation=none, which the MCP
+          # stdio tests need. The package still supports Node 18+, so the
+          # "node 18" job below exercises the fallback path.
+          node-version: 22
       - run: npm ci
       - name: version parity (package.json vs Cargo.toml)
         run: node tools/check-version.mjs
@@ -66,9 +69,11 @@ jobs:
       - name: type-definition and ESM-wrapper parity
         run: node tools/check-dts.mjs
       - name: node tests
-        # The MCP stdio tests spawn a subprocess, which requires test isolation
-        # to be disabled in restricted environments.
-        run: node --test --experimental-test-isolation=none "tests/*.test.js"
+        # The MCP stdio tests spawn a subprocess, so the suite needs
+        # --experimental-test-isolation=none. That flag only exists on Node
+        # 22.8+; tools/run-tests.mjs probes for it and falls back to the
+        # default per-file isolation on older Node.
+        run: node tools/run-tests.mjs
       - name: verify the staged native binary
         run: node tools/verify-native.mjs
       - name: package sanity check
@@ -83,6 +88,36 @@ jobs:
         # and anchors; this check covers the docs' claims about behaviour.
         run: node tools/check-docs.mjs
 
+  node-oldest:
+    name: node 18 (oldest supported)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          # The package declares node >=18. Node 18 has no
+          # --experimental-test-isolation=none, so this job proves the
+          # test runner falls back cleanly rather than dying on an
+          # unknown flag -- and that the package itself loads and works
+          # on the oldest version we claim to support.
+          node-version: 18
+      - run: npm ci
+      - name: build the native module
+        run: npm run build
+      - name: the package loads and works on Node 18
+        run: |
+          node -e "
+            const h = require('./index.js');
+            if (typeof h.hyperglobSync !== 'function') throw new Error('hyperglobSync missing');
+            const out = h.hyperglobSync('package.json', { cwd: process.cwd(), pathsOnly: true });
+            if (!out.includes('package.json')) throw new Error('scan returned nothing: ' + JSON.stringify(out));
+            console.log('node ' + process.version + ': ok');
+          "
+      - name: node tests
+        run: node tools/run-tests.mjs
+
   package:
     name: package (tarball smoke test)
     runs-on: ubuntu-latest
@@ -92,7 +127,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci
       - name: pack
         run: npm pack
