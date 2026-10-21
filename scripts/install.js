@@ -201,7 +201,11 @@ async function downloadToFile(url, target) {
 
   if (res.statusCode !== 200) {
     res.resume();
-    throw new Error('status=' + res.statusCode);
+    const err = new Error('status=' + res.statusCode);
+    // Carry the status so callers can distinguish "not found" (the release
+    // does not exist yet) from a transient failure worth retrying.
+    err.status = res.statusCode;
+    throw err;
   }
 
   const expectedLength = Number(res.headers['content-length']);
@@ -312,6 +316,28 @@ async function ensureNativeBinary() {
     let tmp = null;
     try {
       tmp = await downloadToFile(assetUrl, dest);
+    } catch (e) {
+      // A 404 means the release for this version does not exist yet. That is
+      // not a broken install: the version was published to npm before its
+      // binaries were attached to the release page, or the install is
+      // happening from a source checkout. Either way the package is still
+      // usable -- it just has to be built from source. Do not fail the
+      // install over it, and do not retry: a 404 will not become a 200.
+      if (e && e.status === 404) {
+        console.warn(
+          'hyperglob: no prebuilt binary for ' + asset + ' at release ' + tag +
+          ' (the release does not exist yet).'
+        );
+        console.warn(
+          'hyperglob: build it from source instead -- run `npm run build` in the package directory.'
+        );
+        return { installed: false, reason: 'no release for this version' };
+      }
+      lastError = e;
+      if (attempt < MAX_ATTEMPTS) continue;
+      break;
+    }
+    try {
 
       // Integrity: prefer the published checksums.txt, fall back to a
       // size + magic-byte check when the manifest is unavailable.

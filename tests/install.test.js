@@ -54,6 +54,12 @@ test.before(async () => {
       res.end('not found');
       return;
     }
+    if (route === '/boom') {
+      // A server error: transient, so the installer should retry it.
+      res.writeHead(500);
+      res.end('boom');
+      return;
+    }
     if (route === '/checksums.txt') {
       const body = Buffer.from(
         '0000000000000000000000000000000000000000000000000000000000000000  hyperglob.test.node\n'
@@ -123,6 +129,28 @@ test('a 404 response leaves NO file at the destination', async () => {
   await assert.rejects(() => install.downloadToFile(url('/notfound'), dest), /status=404/);
   assert.ok(!fs.existsSync(dest));
   assert.deepEqual(fs.readdirSync(root).filter((f) => f.startsWith('missing.node.tmp-')), []);
+});
+
+test('a 404 error carries the status code', async () => {
+  // The installer distinguishes "this release does not exist yet" (404) from
+  // a transient failure worth retrying. It can only do that if the status
+  // survives on the error.
+  const dest = path.join(root, 'status.node');
+  const err = await install
+    .downloadToFile(url('/notfound'), dest)
+    .then(() => null, (e) => e);
+  assert.ok(err, 'expected the download to reject');
+  assert.equal(err.status, 404);
+  assert.match(err.message, /status=404/);
+});
+
+test('a non-404 failure carries its status code too', async () => {
+  const dest = path.join(root, 'status500.node');
+  const err = await install
+    .downloadToFile(url('/boom'), dest)
+    .then(() => null, (e) => e);
+  assert.ok(err, 'expected the download to reject');
+  assert.equal(err.status, 500);
 });
 
 test('an empty body is rejected', async () => {
