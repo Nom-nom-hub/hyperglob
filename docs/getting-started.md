@@ -206,5 +206,6 @@ warm-index scan of the same tree always return the same set.
 - [Selector reference](selectors.md) — the query language in full.
 - [CLI reference](cli.md) — every flag and exit code.
 - [MCP reference](mcp.md) — tool schemas and response shapes.
+- [DeepSeek Harness](dsh.md) — install as a Harness bundle.
 - [Architecture](architecture.md) — how the Rust core, traversal, ignore stack
   and transports work.

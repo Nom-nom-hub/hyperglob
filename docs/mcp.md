@@ -44,8 +44,27 @@ VS Code, whose project config uses a `servers` key:
 }
 ```
 
-### Auto-registration is opt-in
+### DeepSeek Harness
 
+hyperglob ships as a [DeepSeek Harness](https://github.com/deepseek-ai) bundle,
+so it does not need any of the JSON above. Install it into the profile and the
+Harness registers the tools itself:
+
+```bash
+cd ~/.dsh/profiles/desktop
+pnpm add @blazeinstall/hyperglob
+```
+
+Add `"@blazeinstall/hyperglob"` to the profile's `package.json` →
+`dsh.profile.bundles` and restart the Harness. The tools appear as
+`mcp__hyperglob__hyperglob_query`, `mcp__hyperglob__hyperglob_paths`, and
+`mcp__hyperglob__hyperglob_dependents` — the same three tools, under the
+Harness's server-qualified names.
+
+See [DeepSeek Harness](dsh.html) for the bundle internals, configuration, and
+how to verify the install.
+
+### Auto-registration is opt-in
 The `postinstall` script can add a `hyperglob` entry to the MCP configs of
 common agents — Claude Code, Cursor, Gemini CLI, Codex, Zed, Cline, Roo Code,
 Continue, Windsurf, Kilo Code, OpenCode, Kiro, Amp, Factory Droid, Crush.
@@ -360,3 +379,4 @@ file is the process entry point.
 - [Selectors](selectors.md) — the query language the `pattern` argument uses.
 - [API](api.md) — the same options from Node.
 - [CLI](cli.md) — the same engine from a shell.
+- [DeepSeek Harness](dsh.md) — install as a Harness bundle.

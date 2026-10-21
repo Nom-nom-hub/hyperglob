@@ -1,0 +1,19 @@
+# hyperglob as a DeepSeek Harness bundle.
+#
+# The Harness reaches this bundle's tools as mcp__hyperglob__<tool>:
+#   mcp__hyperglob__hyperglob_query       find files by glob + selector
+#   mcp__hyperglob__hyperglob_paths       paths-only discovery (fastest)
+#   mcp__hyperglob__hyperglob_dependents  import-graph dependents
+#
+# `insert` with no target id appends the row to the bundle's own entry
+# list, so hyperglob's tools join the model's tool list for every session
+# that uses this profile.
+#
+# The row's `name` is a RELATIVE path. The Harness rewrites a relative
+# plugin name in an inserted row to a file URL beside this patch file (see
+# `anchorInsertedPluginNames` in dsh-app-boot), so the plugin is found
+# wherever the bundle is installed. It anchors the bundle's own files
+# through `import.meta.url` and registers the MCP server from there.
+- insert:
+    - id: hyperglob-dsh
+      name: './dsh-plugin/index.mjs'

@@ -19,3 +19,11 @@ crush.json
 .roo/
 .vscode/
 .scripts/
+
+# Scratch directories used while developing the DeepSeek Harness bundle:
+# an extracted runtime, a throwaway DSH home, and local package caches.
+.dsh-extract/
+.dsh-runtime/
+.dsh-home/
+.pnpm-store/
+.npm-cache/

@@ -118,6 +118,25 @@ claude mcp add hyperglob -- node /path/to/hyperglob/mcp.js
 { "mcpServers": { "hyperglob": { "command": "node", "args": ["/path/to/hyperglob/mcp.js"] } } }
 ```
 
+### DeepSeek Harness
+
+hyperglob also ships as a [DeepSeek Harness](https://github.com/deepseek-ai) bundle. Installing it registers three tools with the Harness, so every session in that profile can find files without leaving the conversation:
+
+| Tool | What it does |
+| --- | --- |
+| `mcp__hyperglob__hyperglob_query` | Find files by glob + selector, with sizes and timestamps. |
+| `mcp__hyperglob__hyperglob_paths` | The same discovery, paths only — the fastest form. |
+| `mcp__hyperglob__hyperglob_dependents` | The import-graph dependents of a file. |
+
+```bash
+cd ~/.dsh/profiles/desktop
+pnpm add @blazeinstall/hyperglob
+```
+
+Then add `"@blazeinstall/hyperglob"` to the profile's `package.json` → `dsh.profile.bundles` and restart the Harness. The bundle resolves the MCP server from its own installed location, so it works from a linked checkout too (`pnpm add link:/path/to/hyperglob`).
+
+See [docs/dsh.md](docs/dsh.md) for the bundle internals, configuration, and how to verify the install.
+
 ## Warm index
 
 Pass `index: true` (CLI: `--index`) to maintain a snapshot of the tree at `<cwd>/.hyperglob/index.json`. Repeat queries validate the snapshot by stat-ing directories and ignore files (structural changes bump a parent directory's mtime, so validated path answers are exact), then answer in memory — at 110k files a warm `pathsOnly` query measured **39 ms vs 83 ms** for a full walk, and warm entries+stats ~**322 vs 452 ms**. Metadata for matched entries is refreshed with a stat and content selectors always read fresh bytes, so answers stay exact; the snapshot rebuilds automatically on any validation mismatch. (One known edge: filesystems with 1-second mtime granularity can miss a structural change made in the same second as the snapshot build.)

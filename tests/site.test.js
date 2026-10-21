@@ -21,6 +21,7 @@ const PAGES = [
   'selectors',
   'cli',
   'mcp',
+  'dsh',
   'architecture',
 ];
 

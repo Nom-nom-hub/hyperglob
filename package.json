@@ -4,6 +4,11 @@
     "hyperglob-mcp": "mcp.js"
   },
   "description": "A multi-threaded, AST-aware, zero-copy file discovery engine designed to replace legacy globbing for AI agents, monorepos, and high-performance developer tooling.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "devDependencies": {
     "fast-glob": "^3.3.3",
     "fdir": "^6.4.0",
@@ -29,6 +34,8 @@
     "index.d.ts",
     "cli.js",
     "mcp.js",
+    "cordis.patch.yml",
+    "dsh-plugin",
     "scripts/install.js",
     "scripts/native-integrity.js",
     "Cargo.toml",
@@ -46,7 +53,9 @@
     "napi",
     "gitignore",
     "monorepo",
-    "ai-agents"
+    "ai-agents",
+    "deepseek-harness",
+    "dsh"
   ],
   "license": "MIT",
   "main": "index.js",

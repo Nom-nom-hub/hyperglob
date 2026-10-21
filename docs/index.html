@@ -28,6 +28,7 @@
       <a href="selectors.html">Selectors</a>
       <a href="cli.html">CLI</a>
       <a href="mcp.html">MCP</a>
+      <a href="dsh.html">Harness</a>
       <a href="architecture.html">Architecture</a>
     </nav>
     <div class="header-tools">
@@ -232,6 +233,17 @@
           <pre class="mini-code"><code>claude mcp add hyperglob \
   <span class="c-flag">--</span> node /path/to/hyperglob/mcp.js</code></pre>
           <a class="surface-link" href="mcp.html">MCP guide →</a>
+        </article>
+
+        <article class="surface">
+          <div class="surface-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 14h5"/><path d="M8 17h8"/></svg>
+          </div>
+          <h3>Harness bundle</h3>
+          <p>Ships as a DeepSeek Harness bundle. Install it once and every session gets <code>mcp__hyperglob__*</code> tools.</p>
+          <pre class="mini-code"><code>pnpm add <span class="c-str">@blazeinstall/hyperglob</span>
+<span class="c-comment"># then list it in dsh.profile.bundles</span></code></pre>
+          <a class="surface-link" href="dsh.html">Harness guide →</a>
         </article>
       </div>
     </div>

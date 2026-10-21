@@ -455,4 +455,5 @@ class HyperEntry {
 - [Selectors](selectors.md) — the query language in full.
 - [CLI](cli.md) — the same engine from a shell.
 - [MCP](mcp.md) — the same engine as agent tools.
+- [DeepSeek Harness](dsh.md) — the bundle that wires this into the Harness.
 - [Architecture](architecture.md) — why it is fast.

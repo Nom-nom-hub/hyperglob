@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DeepSeek Harness · hyperglob</title>
+<meta name="description" content="How to install hyperglob as a DeepSeek Harness bundle so every session gets `mcp__hyperglob__*` tools." />
+<meta property="og:title" content="DeepSeek Harness · hyperglob" />
+<meta property="og:description" content="How to install hyperglob as a DeepSeek Harness bundle so every session gets `mcp__hyperglob__*` tools." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/dsh.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/dsh.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html">MCP</a><a href="dsh.html" class="active" aria-current="page">Harness</a><a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>How to install hyperglob as a DeepSeek Harness bundle so every session gets <code>mcp__hyperglob__*</code> tools.</p></blockquote>
+<h1 id="deepseek-harness">DeepSeek Harness<a class="anchor" href="#deepseek-harness" aria-label="Permalink to this section">#</a></h1>
+<p>hyperglob ships as a <a href="https://github.com/deepseek-ai" target="_blank" rel="noopener noreferrer">DeepSeek Harness</a> <strong>bundle</strong>.
+Installing the bundle registers hyperglob's three MCP tools with the Harness,
+so any model running in that profile can find files by glob + selector without
+leaving the conversation.</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Tool</th><th style="text-align:left">What it does</th></tr></thead><tbody><tr><td style="text-align:left"><code>mcp__hyperglob__hyperglob_query</code></td><td style="text-align:left">Find files by glob pattern and selector, with sizes and timestamps.</td></tr><tr><td style="text-align:left"><code>mcp__hyperglob__hyperglob_paths</code></td><td style="text-align:left">The same discovery, paths only — the fastest form.</td></tr><tr><td style="text-align:left"><code>mcp__hyperglob__hyperglob_dependents</code></td><td style="text-align:left">The import-graph dependents of a file.</td></tr></tbody></table></div>
+<h2 id="install">Install<a class="anchor" href="#install" aria-label="Permalink to this section">#</a></h2>
+<p>The bundle is a normal npm package, so it installs like one. From your
+Harness profile directory:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">cd ~/.dsh/profiles/desktop
+pnpm add @blazeinstall/hyperglob</code></pre></div>
+<p>Then list the bundle in the profile's <code>package.json</code>:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;dsh&quot;: {
+    &quot;profile&quot;: {
+      &quot;bundles&quot;: [
+        &quot;@deepseek-ai/dsh-base&quot;,
+        &quot;@blazeinstall/hyperglob&quot;
+      ]
+    }
+  }
+}</code></pre></div>
+<p>Restart the Harness. The three <code>mcp__hyperglob__*</code> tools are now available
+to every session in that profile.</p>
+<blockquote><p>The <code>desktop</code> profile is managed by the Electron application, so <code>dsh</code> CLI
+commands refuse it. Use the <code>web</code> or <code>headless</code> profile for scripted checks.</p></blockquote>
+<h3 id="developing-against-a-local-checkout">Developing against a local checkout<a class="anchor" href="#developing-against-a-local-checkout" aria-label="Permalink to this section">#</a></h3>
+<p>Point the profile at a working copy instead of the published package:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">cd ~/.dsh/profiles/desktop
+pnpm add link:/path/to/hyperglob</code></pre></div>
+<p>The bundle resolves the MCP server through its own installed location, so a
+linked checkout works exactly like a published one — rebuild the native
+binding with <code>npm run build</code> after changing the Rust core.</p>
+<h2 id="how-it-works">How it works<a class="anchor" href="#how-it-works" aria-label="Permalink to this section">#</a></h2>
+<p>A bundle is an npm package that declares a patch file:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;dsh&quot;: {
+    &quot;bundle&quot;: {
+      &quot;patch&quot;: &quot;./cordis.patch.yml&quot;
+    }
+  }
+}</code></pre></div>
+<p>hyperglob's <code>cordis.patch.yml</code> inserts a single row:</p>
+<div class="code-block" data-lang="yaml"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-yaml">- insert:
+    - id: hyperglob-dsh
+      name: './dsh-plugin/index.mjs'</code></pre></div>
+<p>The row's <code>name</code> is a <strong>relative</strong> path on purpose. The Harness rewrites a
+relative plugin name in an inserted row to a file URL beside the patch file,
+so the plugin is found wherever the bundle happens to be installed. This
+matters because config values do not get the same treatment: a bundle cannot
+name its own files in a row's <code>args</code> or <code>cwd</code>, and a bare <code>mcp.js</code> would be
+resolved against the Harness's working directory instead of the bundle's.</p>
+<p>The plugin anchors itself with <code>import.meta.url</code> and registers the MCP
+server from there:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(here);          // the package root, holding mcp.js
+const SERVER = path.join(root, 'mcp.js');
+
+loader.create({
+  id: 'mcp-hyperglob',
+  name: '@deepseek-ai/dsh-mcp-client',
+  config: {
+    serverName: 'hyperglob',
+    transport: 'stdio',
+    command: process.execPath,           // absolute node path
+    args: [SERVER],
+    cwd: root,                            // never empty
+    failOnStartupError: true,
+    toolCallTimeoutMs: 120_000,
+  },
+});</code></pre></div>
+<p>Two details are load-bearing:</p>
+<ul><li><strong><code>command: process.execPath</code>.</strong> The Harness scrubs the environment it</li></ul>
+<p>  passes to MCP servers, and the scrubbed <code>PATH</code> need not contain the Node
+  install. A bare <code>&quot;node&quot;</code> fails with <code>spawn node ENOENT</code>; the absolute path
+  of the running Node binary always works.</p>
+<ul><li><strong><code>cwd</code> is never empty.</strong> An empty <code>cwd</code> makes the spawn fail with <code>ENOENT</code>.</li></ul>
+<p>  The server starts in the package root; the model passes the session's
+  working directory explicitly on every call, so the server itself does not
+  need to know it.</p>
+<h2 id="configuration">Configuration<a class="anchor" href="#configuration" aria-label="Permalink to this section">#</a></h2>
+<p>The plugin accepts two options. They are set on the inserted row in your own
+profile patch, or in the bundle's own <code>cordis.patch.yml</code>:</p>
+<div class="code-block" data-lang="yaml"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-yaml">- id: hyperglob-dsh
+  name: './dsh-plugin/index.mjs'
+  config:
+    timeoutMs: 120000
+    failOnStartupError: true</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Option</th><th style="text-align:left">Default</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>timeoutMs</code></td><td style="text-align:left"><code>120000</code></td><td style="text-align:left">The per-call timeout for a hyperglob tool call.</td></tr><tr><td style="text-align:left"><code>failOnStartupError</code></td><td style="text-align:left"><code>true</code></td><td style="text-align:left">Fail the plugin's start when the MCP server cannot be reached.</td></tr></tbody></table></div>
+<p><code>failOnStartupError: true</code> is the default on purpose. A missing native
+binding is a real problem, and a silently absent tool is much harder to
+diagnose than a failed start.</p>
+<h2 id="working-directory">Working directory<a class="anchor" href="#working-directory" aria-label="Permalink to this section">#</a></h2>
+<p>Every hyperglob MCP tool takes an optional <code>cwd</code>. The Harness puts the
+session's working directory in the system prompt:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">Current working directory: &quot;C:\\path\\to\\project&quot;</code></pre></div>
+<p>so a model can pass it straight through and search the right tree:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;pattern&quot;: &quot;src/**/*.ts&quot;,
+  &quot;cwd&quot;: &quot;C:\\path\\to\\project&quot;
+}</code></pre></div>
+<p>Without a <code>cwd</code>, the tools search the server's own working directory — the
+package root. That is almost never what you want, so pass it.</p>
+<h2 id="verifying-the-install">Verifying the install<a class="anchor" href="#verifying-the-install" aria-label="Permalink to this section">#</a></h2>
+<p>Check that the server started and the tools registered. A healthy boot logs
+nothing about <code>mcp-hyperglob</code>; a broken one logs the reason:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">mcp-hyperglob (@deepseek-ai/dsh-mcp-client): Error: mcp-client(hyperglob):
+initial connection or tool synchronization failed</code></pre></div>
+<p>Common failures:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Symptom</th><th style="text-align:left">Cause</th></tr></thead><tbody><tr><td style="text-align:left"><code>spawn node ENOENT</code></td><td style="text-align:left">The command was a bare <code>node</code>; use <code>process.execPath</code>.</td></tr><tr><td style="text-align:left"><code>ENOENT</code> with no command</td><td style="text-align:left">The <code>cwd</code> was empty.</td></tr><tr><td style="text-align:left"><code>Cannot find module .../mcp.js</code></td><td style="text-align:left">The plugin resolved the server path wrong; it must be <code>path.join(root, 'mcp.js')</code>.</td></tr><tr><td style="text-align:left"><code>no tools registered</code></td><td style="text-align:left">The native binding is missing; run <code>npm run build</code>.</td></tr></tbody></table></div>
+<p>The fastest end-to-end check is to ask the model to run
+<code>mcp__hyperglob__hyperglob_paths</code> with a <code>cwd</code> pointing at a directory you
+know, and confirm the paths come back relative to it.</p>
+<h2 id="using-it-outside-the-harness">Using it outside the Harness<a class="anchor" href="#using-it-outside-the-harness" aria-label="Permalink to this section">#</a></h2>
+<p>The same server speaks plain MCP over stdio, so any MCP client can use it:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">npx @blazeinstall/hyperglob-mcp</code></pre></div>
+<p>See <a href="mcp.html">MCP</a> for the full tool reference, timeouts, and the other
+clients hyperglob supports.</p>
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="mcp.html">MCP</a> — the tool reference and the other MCP clients.</li><li><a href="getting-started.html">Getting started</a> — the API and CLI in five minutes.</li><li><a href="architecture.html">Architecture</a> — how the Rust core works.</li></ul>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/dsh.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#install">Install</a></li><li class="toc-l3"><a href="#developing-against-a-local-checkout">Developing against a local checkout</a></li><li class="toc-l2"><a href="#how-it-works">How it works</a></li><li class="toc-l2"><a href="#configuration">Configuration</a></li><li class="toc-l2"><a href="#working-directory">Working directory</a></li><li class="toc-l2"><a href="#verifying-the-install">Verifying the install</a></li><li class="toc-l2"><a href="#using-it-outside-the-harness">Using it outside the Harness</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

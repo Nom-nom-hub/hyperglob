@@ -22,7 +22,7 @@
       <span class="brand-name">hyperglob</span>
     </a>
     <nav class="site-nav" aria-label="Documentation">
-      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html" class="active" aria-current="page">MCP</a><a href="architecture.html">Architecture</a>
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html" class="active" aria-current="page">MCP</a><a href="dsh.html">Harness</a><a href="architecture.html">Architecture</a>
     </nav>
     <div class="header-tools">
       <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
@@ -63,6 +63,19 @@ VS Code, whose project config uses a <code>servers</code> key:</p>
     &quot;hyperglob&quot;: { &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;node&quot;, &quot;args&quot;: [&quot;/path/to/hyperglob/mcp.js&quot;] }
   }
 }</code></pre></div>
+<h3 id="deepseek-harness">DeepSeek Harness<a class="anchor" href="#deepseek-harness" aria-label="Permalink to this section">#</a></h3>
+<p>hyperglob ships as a <a href="https://github.com/deepseek-ai" target="_blank" rel="noopener noreferrer">DeepSeek Harness</a> bundle,
+so it does not need any of the JSON above. Install it into the profile and the
+Harness registers the tools itself:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">cd ~/.dsh/profiles/desktop
+pnpm add @blazeinstall/hyperglob</code></pre></div>
+<p>Add <code>&quot;@blazeinstall/hyperglob&quot;</code> to the profile's <code>package.json</code> →
+<code>dsh.profile.bundles</code> and restart the Harness. The tools appear as
+<code>mcp__hyperglob__hyperglob_query</code>, <code>mcp__hyperglob__hyperglob_paths</code>, and
+<code>mcp__hyperglob__hyperglob_dependents</code> — the same three tools, under the
+Harness's server-qualified names.</p>
+<p>See <a href="dsh.html">DeepSeek Harness</a> for the bundle internals, configuration, and
+how to verify the install.</p>
 <h3 id="auto-registration-is-opt-in">Auto-registration is opt-in<a class="anchor" href="#auto-registration-is-opt-in" aria-label="Permalink to this section">#</a></h3>
 <p>The <code>postinstall</code> script can add a <code>hyperglob</code> entry to the MCP configs of
 common agents — Claude Code, Cursor, Gemini CLI, Codex, Zed, Cline, Roo Code,
@@ -223,14 +236,14 @@ runner.close();</code></pre></div>
 file is the process entry point.</p>
 <hr />
 <h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
-<ul><li><a href="selectors.md">Selectors</a> — the query language the <code>pattern</code> argument uses.</li><li><a href="api.md">API</a> — the same options from Node.</li><li><a href="cli.md">CLI</a> — the same engine from a shell.</li></ul>
+<ul><li><a href="selectors.md">Selectors</a> — the query language the <code>pattern</code> argument uses.</li><li><a href="api.md">API</a> — the same options from Node.</li><li><a href="cli.md">CLI</a> — the same engine from a shell.</li><li><a href="dsh.md">DeepSeek Harness</a> — install as a Harness bundle.</li></ul>
     <footer class="doc-footer">
       <p>
         Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/mcp.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
       </p>
     </footer>
   </article>
-  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#registering-with-an-agent">Registering with an agent</a></li><li class="toc-l3"><a href="#generic-mcp-client">Generic MCP client</a></li><li class="toc-l3"><a href="#claude-code">Claude Code</a></li><li class="toc-l3"><a href="#cursor-cursormcpjson-cline-windsurf-gemini-cli-codex-zed-continue-opencode">Cursor (.cursor/mcp.json), Cline, Windsurf, Gemini CLI, Codex, Zed, Continue, OpenCode</a></li><li class="toc-l3"><a href="#auto-registration-is-opt-in">Auto-registration is opt-in</a></li><li class="toc-l2"><a href="#tools">Tools</a></li><li class="toc-l3"><a href="#hyperglob_query">hyperglob_query</a></li><li class="toc-l3"><a href="#hyperglob_paths">hyperglob_paths</a></li><li class="toc-l3"><a href="#hyperglob_dependents">hyperglob_dependents</a></li><li class="toc-l2"><a href="#errors">Errors</a></li><li class="toc-l2"><a href="#timeouts">Timeouts</a></li><li class="toc-l2"><a href="#isolation-and-stdout-hygiene">Isolation and stdout hygiene</a></li><li class="toc-l3"><a href="#the-worker-pool">The worker pool</a></li><li class="toc-l2"><a href="#protocol-details">Protocol details</a></li><li class="toc-l2"><a href="#using-the-module-directly">Using the module directly</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#registering-with-an-agent">Registering with an agent</a></li><li class="toc-l3"><a href="#generic-mcp-client">Generic MCP client</a></li><li class="toc-l3"><a href="#claude-code">Claude Code</a></li><li class="toc-l3"><a href="#cursor-cursormcpjson-cline-windsurf-gemini-cli-codex-zed-continue-opencode">Cursor (.cursor/mcp.json), Cline, Windsurf, Gemini CLI, Codex, Zed, Continue, OpenCode</a></li><li class="toc-l3"><a href="#deepseek-harness">DeepSeek Harness</a></li><li class="toc-l3"><a href="#auto-registration-is-opt-in">Auto-registration is opt-in</a></li><li class="toc-l2"><a href="#tools">Tools</a></li><li class="toc-l3"><a href="#hyperglob_query">hyperglob_query</a></li><li class="toc-l3"><a href="#hyperglob_paths">hyperglob_paths</a></li><li class="toc-l3"><a href="#hyperglob_dependents">hyperglob_dependents</a></li><li class="toc-l2"><a href="#errors">Errors</a></li><li class="toc-l2"><a href="#timeouts">Timeouts</a></li><li class="toc-l2"><a href="#isolation-and-stdout-hygiene">Isolation and stdout hygiene</a></li><li class="toc-l3"><a href="#the-worker-pool">The worker pool</a></li><li class="toc-l2"><a href="#protocol-details">Protocol details</a></li><li class="toc-l2"><a href="#using-the-module-directly">Using the module directly</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
 </main>
 
 <footer class="site-footer">

@@ -380,3 +380,4 @@ Requiring `cli.js` does not run a scan.
 - [Selectors](selectors.md) — the query language in the pattern argument.
 - [API](api.md) — the same options from Node.
 - [MCP](mcp.md) — the same engine as agent tools.
+- [DeepSeek Harness](dsh.md) — the bundle that wires this into the Harness.
