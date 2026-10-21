@@ -15,10 +15,13 @@
   },
   "exports": {
     ".": {
+      "types": "./index.d.ts",
       "import": "./index.mjs",
-      "require": "./index.js",
-      "types": "./index.d.ts"
-    }
+      "require": "./index.js"
+    },
+    "./mcp.js": "./mcp.js",
+    "./cli.js": "./cli.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "index.js",
@@ -26,7 +29,15 @@
     "index.d.ts",
     "cli.js",
     "mcp.js",
-    "scripts/install.js"
+    "scripts/install.js",
+    "scripts/native-integrity.js",
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    "src",
+    "examples",
+    "docs",
+    "hyperglob.*.node"
   ],
   "keywords": [
     "glob",
@@ -50,18 +61,12 @@
     "build": "node scripts/build-native.mjs",
     "build:debug": "node scripts/build-native.mjs --debug",
     "example": "node examples/prd-examples.js",
-    "test": "npm run build && node --test tests/hyperglob.test.js",
+    "test": "npm run build && node --test --experimental-test-isolation=none \"tests/*.test.js\"",
     "bench:parity": "node bench/parity.mjs",
     "bench:real": "node bench/real-repo.mjs",
     "bench:check": "node bench/check-regression.mjs",
     "postinstall": "node scripts/install.js"
   },
   "types": "index.d.ts",
-  "version": "1.0.6",
-  "dependencies": {
-    "@blazeinstall/hyperglob": "^1.0.2"
-  },
-  "allowScripts": {
-    "@blazeinstall/hyperglob@1.0.2": true
-  }
+  "version": "1.0.6"
 }

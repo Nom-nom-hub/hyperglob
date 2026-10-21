@@ -1,7 +1,8 @@
 name: Release binaries
 
 # On a version tag, build the native module on each platform and attach
-# every .node binary to the GitHub release for that tag.
+# every .node binary plus a checksums.txt manifest to the GitHub release for
+# that tag.
 on:
   push:
     tags: ['v*']
@@ -19,26 +20,56 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64-gnu
+            triple: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: linux-arm64-gnu
+            triple: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: linux-x64-musl
+            triple: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: linux-arm64-musl
+            triple: aarch64-unknown-linux-musl
           - os: macos-latest
             target: darwin-arm64
+            triple: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: darwin-x64
+            triple: x86_64-apple-darwin
           - os: windows-latest
             target: win32-x64-msvc
+            triple: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Install musl toolchain (musl targets only)
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
       - name: Build + test
         run: npm install --ignore-scripts && npm test
+      - name: Remove host-staged binaries
+        # `npm test` builds and stages the *host* binary. Remove it so the
+        # upload step cannot pick up a binary for the wrong platform.
+        run: rm -f hyperglob.*.node
+      - name: Stage the .node binary
+        # --release-name stages the binary under the GitHub release asset name
+        # (which differs from the canonical runtime name for the musl targets).
+        run: node scripts/build-native.mjs --target ${{ matrix.triple }} --release-name
+      - name: Verify the staged binary
+        run: node tools/verify-native.mjs hyperglob.${{ matrix.target }}.node
       - name: Upload .node artifact
         uses: actions/upload-artifact@v4
         with:
           name: hyperglob-${{ matrix.target }}
-          path: hyperglob.*.node
+          path: hyperglob.${{ matrix.target }}.node
           if-no-files-found: error
 
   publish:
@@ -50,8 +81,12 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Generate checksums.txt
+        run: cd artifacts && sha256sum *.node > checksums.txt && cat checksums.txt
       - name: Attach to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.node
+          files: |
+            artifacts/*.node
+            artifacts/checksums.txt
           fail_on_unmatched_files: true
