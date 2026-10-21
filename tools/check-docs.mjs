@@ -241,6 +241,27 @@ expect(
     /strip_suffix\("kb"\)\s*\{\s*\n?\s*\(p, 1024\.0\)/.test(selectorsRs)
 );
 
+// ---------------------------------------------------------------------------
+// A version quoted in the docs must match the current version, or the
+// example is lying. A stale version number is worse than no example.
+// ---------------------------------------------------------------------------
+const currentVersion = pkg.version;
+const versionedDocs = pages
+  .map((p) => path.join(DOCS, `${p}.md`))
+  .filter((f) => fs.existsSync(f));
+for (const f of versionedDocs) {
+  const text = fs.readFileSync(f, 'utf8');
+  // Only look at quoted version literals, e.g. version(); // '1.0.7'
+  const quoted = [...text.matchAll(/['"](\d+\.\d+\.\d+)['"]/g)].map((m) => m[1]);
+  for (const v of quoted) {
+    expect(
+      `${path.basename(f)} quotes the current version (${v})`,
+      v === currentVersion,
+      `the current version is ${currentVersion}`
+    );
+  }
+}
+
 console.log('');
 if (failures.length) {
   console.error(`check-docs: ${failures.length} check(s) failed`);
