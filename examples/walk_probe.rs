@@ -7,7 +7,9 @@ fn main() {
         let t = Instant::now();
         let mut n = 0usize;
         for e in ignore::Walk::new(&root) {
-            if e.is_ok() { n += 1; }
+            if e.is_ok() {
+                n += 1;
+            }
         }
         println!("ignore::Walk count-only: {:?} n={}", t.elapsed(), n);
     }
@@ -29,7 +31,11 @@ fn main() {
                 ignore::WalkState::Continue
             })
         });
-        println!("ignore::WalkParallel count-only: {:?} n={}", t.elapsed(), count.load(std::sync::atomic::Ordering::Relaxed));
+        println!(
+            "ignore::WalkParallel count-only: {:?} n={}",
+            t.elapsed(),
+            count.load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
     // 3. std fs recursive walk, count only
     fn walk(p: &std::path::Path, n: &mut usize) {
