@@ -17,7 +17,9 @@ npm install @blazeinstall/hyperglob   # postinstall fetches the prebuilt .node f
 # (source build still available: npm run build  — cargo + Node 18+)
 ```
 
-Prebuilt binaries for Linux/macOS/Windows are attached to each GitHub release (`v*` tags) and downloaded automatically on `npm install`.<|end|>
+Prebuilt binaries for Linux/macOS/Windows are attached to each GitHub release (`v*` tags) and downloaded automatically on `npm install`.
+
+**Documentation:** <https://nom-nom-hub.github.io/hyperglob/> — a full guide, API reference, selector reference, and MCP setup. The pages are in [`docs/`](docs/) as Markdown; the site is rendered from them with no build tooling.<|end|>
 
 ## For agents
 
@@ -82,17 +84,29 @@ npx hyperglob 'src/**/*.ts :exports("useServerHook")' --json
 | --- | --- |
 | `src/**/*.ts` | Standard fast multi-threaded glob. |
 | `src/**/*.ts :contains("export const")` | Only files whose content contains the literal (evaluated in Rust during the crawl). `:contains(/regex/)` and `:matches("regex")` run a regex byte search. |
-| `src/**/*.ts :exports("useServerHook")` | **Full AST check** (oxc parser): the module really exports that name — any form: declarations, `export { a as b }`, re-exports, default exports. Export-shaped text inside comments or string literals does **not** match. |
+| `src/**/*.ts :exports("useServerHook")` | **AST check** (oxc parser): the module really exports that name — any form: declarations, `export { a as b }`, re-exports, default exports. Export-shaped text inside comments or string literals does **not** match. (A file that fails to parse, or has a non-JS/TS extension, falls back to a regex over a comment- and string-masked copy of the source — the traps still do not match.) |
 | `src/**/*.ts :imports("react")` | AST check: the module depends on `react` (exact source or a subpath like `react/jsx-runtime`); `require()`, dynamic `import()`, and re-export (`export … from`) sources count too. |
 | `src/**/*.json :has-key("dependencies.react")` | Evaluates JSON structure in-flight during traversal (dotted path, array indices work). |
-| `src/**/* :size(<100kb)` | Files smaller than 100KB, filtered at the OS stat step. Ops: `< <= > >= =`; units `b kb mb gb kib mib gib`. |
+| `src/**/* :size(<100kb)` | Files smaller than 100KB, filtered at the OS stat step. Ops: `< <= > >= =`; units `b kb mb gb kib mib gib` — note that `kb` and `kib` are the same multiplier (1024), as are `mb`/`mib` and `gb`/`gib`; there are no decimal (1000-based) units. |
 | `src/**/* :modified(>2026-10-01)` | Filters on filesystem mtime (UTC). Accepts `YYYY-MM-DD` and full ISO datetimes. |
 
 Selectors compose with AND semantics and stack with plain patterns and `!` negations in the same query or across an array of queries.
 
+Two edge cases worth knowing: `:contains("")` matches **nothing** (an empty needle is rejected rather than matching every file), and the `ignore` option is a separate, explicit exclusion list applied to matched results — it sits on top of the native ignore stack (`.gitignore` and friends), it does not replace it.
+
 ## MCP server (for agents)
 
-`mcp.js` exposes hyperglob as an MCP tool server over stdio — any MCP-speaking agent can run discovery queries without Node bindings. Tools: `hyperglob_query` (full entries as JSON), `hyperglob_paths` (paths-only fast path), and `hyperglob_dependents` (transitive importers of a file). Query tools take `pattern` (with selectors), optional `cwd`, `maxDepth`, and `index: true` for the warm index; `hyperglob_query` also accepts `content: true`.
+`mcp.js` exposes hyperglob as an MCP tool server over stdio — any MCP-speaking agent can run discovery queries without Node bindings. Tools: `hyperglob_query` (full entries as JSON), `hyperglob_paths` (paths-only fast path), and `hyperglob_dependents` (transitive importers of a file). Query tools take `pattern` (with selectors) plus the usual options (`cwd`, `maxDepth`, `dot`, `gitignore`, `ignoreFiles`, `ignore`, `onlyFiles`, `followSymlinks`, `stats`, `content`, `index`) and paging controls (`limit`, `offset`); `hyperglob_query` also accepts `content: true`.
+
+Tool calls run in a worker thread with a wall-clock budget (default 60 s). The budget is set per call with the `timeoutMs` argument, or for the whole server with `--timeout-ms <ms>` or `HYPERGLOB_MCP_TIMEOUT_MS=<ms>`; a per-call value always wins. A call that exceeds the budget returns an error instead of wedging the server, and the worker is replaced so a crashed native call cannot take the protocol loop down with it.
+
+**Auto-registration is opt-in.** The `postinstall` script can add a `hyperglob` entry to the MCP configs of common agents (Claude Code, Cursor, Gemini, Codex, and others). It is **disabled by default** because it edits your global agent configuration. Enable it explicitly:
+
+```bash
+HYPERGLOB_REGISTER_MCP=1 npm install
+```
+
+Registration is idempotent (an existing `hyperglob` entry is never duplicated) and never overwrites a config it cannot parse.
 
 **Claude Code**
 ```bash
@@ -177,27 +191,48 @@ Against the classic `glob` package (v13) it is not close either: 28.9 ms vs 138.
 | `gitignore` | `true` | `.gitignore` + global + `.git/info/exclude`. |
 | `ignoreFiles` | `true` | `.ignore` + `.agentignore`. |
 | `dot` | `false` | Include dotfiles/dot-directories. |
-| `maxDepth` | — | Depth below the patterns' static base (fast-glob `deep` semantics). |
-| `threads` | `0` (auto) | Walker threads. |
-| `stats` | `true` | Populate `size` / `modified`. `false` skips a stat per file. |
-| `onlyFiles` | `true` | Files only. |
-| `followSymlinks` | `false` |  |
+| `maxDepth` | — | Depth below the patterns' static base (fast-glob `deep` semantics). Must be a non-negative integer. |
+| `threads` | `0` (auto) | Walker threads. Must be a non-negative integer. |
+| `stats` | `true` | Populate `size` / `modified`. `false` skips a stat per file (and `entry.modified` is then `undefined`). |
+| `onlyFiles` | `true` | Files only. `false` also reports directories. |
+| `followSymlinks` | `false` | Symlinked directories are not descended into. Cycles are always broken, so a link back to an ancestor terminates. |
 | `content` | `false` | Attach `content` (string) + `buffer` to entries. |
 | `ignore` | `[]` | Extra glob patterns to exclude. |
 | `pathsOnly` | `false` | Return path strings (fast path). |
 | `index` | `false` | Use the warm index snapshot at `<cwd>/.hyperglob/` (sync APIs; see Warm index). |
 
+### Pattern semantics
+
+- A pattern may not escape the working directory. `../*.ts` is rejected with
+  `pattern escapes the working directory: ../*.ts` rather than returning
+  files above `cwd`.
+- A magic-free pattern that names a **directory** (`src`) matches that
+  directory *and* everything under it; with `onlyFiles: false` the directory
+  itself is reported. A magic-free pattern that names a **file** (`top.ts`)
+  matches just that file.
+- `src/**` matches the contents of `src` but not `src` itself.
+- The index's own cache directory (`.hyperglob/`) is never included in
+  results, so a live scan and a warm-index scan of the same tree always
+  return the same set.
+
 ## Development
 
 ```bash
 npm run build     # cargo build --release + stage .node
-npm test          # Rust unit tests are run via `cargo test` (9 tests); npm test runs the Node suite (25 tests)
-cargo test        # selector parser unit tests
+npm test          # builds the native module, then runs the Node suite (153 tests)
+cargo test        # Rust unit tests (9 tests)
 npm run example   # the PRD's §4/§5 examples, live
 npm run bench     # benchmark suite (synthetic trees, interleaved vs fast-glob/glob/fdir/tinyglobby)
 npm run bench:parity   # result-parity vs fast-glob on seeded random trees
 node bench/real-repo.mjs /path/to/repo   # bench + parity on a real checkout
 npm run bench:check    # perf-regression gate against bench/baseline.json
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every push and pull request:
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test`, the Node suite, a version-parity check (package.json vs
+Cargo.toml), a platform-table drift check, and a tarball smoke test.
+Releases are built by `.github/workflows/release.yml`, which publishes a
+`checksums.txt` alongside the binaries.
 
 Node 18+, stable Rust. License: MIT.
