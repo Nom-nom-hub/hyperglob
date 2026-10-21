@@ -57,10 +57,14 @@ jobs:
         run: node tools/check-version.mjs
       - name: platform table drift check
         run: node tools/check-platforms.mjs
+      - name: build the native module
+        # Must come before check-dts: that check loads index.js, which needs
+        # the native binding. Without a staged binary the loader tries to
+        # download one from the release page, which does not exist yet for
+        # an unreleased commit.
+        run: npm run build
       - name: type-definition and ESM-wrapper parity
         run: node tools/check-dts.mjs
-      - name: build the native module
-        run: npm run build
       - name: node tests
         # The MCP stdio tests spawn a subprocess, which requires test isolation
         # to be disabled in restricted environments.

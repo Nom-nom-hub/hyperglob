@@ -5,7 +5,21 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const dts = fs.readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8');
-const mod = require('../index.js');
+
+// Loading index.js pulls in the native binding. If it is missing, the loader
+// tries to download one -- which fails for an unreleased commit, since the
+// release page has no binary for it yet. Say so plainly instead.
+let mod;
+try {
+  mod = require('../index.js');
+} catch (e) {
+  console.error(
+    'check-dts: could not load the runtime module.\n' +
+      'The native binding is probably not built. Run `npm run build` first.\n' +
+      `Underlying error: ${e && e.message ? e.message : e}`
+  );
+  process.exit(1);
+}
 
 const valueNames = new Set();
 // export declare function X / export declare const X / export declare class X
