@@ -33,4 +33,29 @@ if (pkg.version !== cargoVersion) {
   process.exit(1);
 }
 
-console.log('check-version: OK -- package.json and Cargo.toml both say ' + pkg.version);
+// The lock file must agree too. `npm ci` refuses to install when the lock
+// file's version does not match package.json, which fails CI at the install
+// step with a message that says nothing about the real cause.
+const lockPath = path.join(root, 'package-lock.json');
+if (fs.existsSync(lockPath)) {
+  const lock = JSON.parse(read('package-lock.json'));
+  const problems = [];
+  if (lock.version !== pkg.version) {
+    problems.push('lock file root version is ' + lock.version);
+  }
+  if (lock.packages && lock.packages[''] && lock.packages[''].version !== pkg.version) {
+    problems.push('lock file packages[""].version is ' + lock.packages[''].version);
+  }
+  if (problems.length) {
+    console.error(
+      'check-version: package-lock.json is out of sync with package.json -- ' +
+      problems.join(', ') + ', but package.json says ' + pkg.version + '.'
+    );
+    console.error('  `npm ci` will refuse to install. Run `npm install --package-lock-only` to fix it.');
+    process.exit(1);
+  }
+}
+
+console.log(
+  'check-version: OK -- package.json, Cargo.toml and package-lock.json all say ' + pkg.version
+);
