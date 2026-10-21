@@ -219,7 +219,8 @@ fn write_snapshot(cwd: &Path, snap: &Snapshot) {
         Ok(j) => j,
         Err(_) => return,
     };
-    let mut buf: Vec<u8> = Vec::with_capacity(header_json.len() + 1 + paths.len() + flags.len() + numbers.len());
+    let mut buf: Vec<u8> =
+        Vec::with_capacity(header_json.len() + 1 + paths.len() + flags.len() + numbers.len());
     buf.extend_from_slice(header_json.as_bytes());
     buf.push(b'\n');
     buf.extend_from_slice(paths.as_bytes());
@@ -297,7 +298,9 @@ fn validate(engine: &Engine, snap: &Snapshot) -> bool {
         } else {
             cwd.join(&f.r)
         };
-        stat_of(&p).map(|(s, m)| s == f.s && m == f.m).unwrap_or(false)
+        stat_of(&p)
+            .map(|(s, m)| s == f.s && m == f.m)
+            .unwrap_or(false)
     })
 }
 
@@ -357,8 +360,9 @@ fn answer(engine: &Engine, snap: &Snapshot, light: bool) -> Vec<Entry> {
                     .and_then(|e| e.to_str())
                     .unwrap_or("")
                     .to_string();
+                let mut ctx = crate::selectors::FileContext::new(&bytes, &ext);
                 for sel in &engine.query.selectors {
-                    if sel.needs_content() && !sel.eval_content_ext(&bytes, &ext) {
+                    if sel.needs_content() && !sel.eval_with(&mut ctx) {
                         return None;
                     }
                 }

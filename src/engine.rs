@@ -27,6 +27,7 @@ pub struct Options {
     pub gitignore: bool,
     pub ignore_files: bool,
     pub dot: bool,
+    #[serde(deserialize_with = "deserialize_max_depth")]
     pub max_depth: Option<usize>,
     pub threads: usize,
     pub stats: bool,
@@ -36,6 +37,32 @@ pub struct Options {
     pub ignore: Vec<String>,
     /// Use (and maintain) the warm index snapshot at <cwd>/.hyperglob/.
     pub index: bool,
+}
+
+/// Deserialize `maxDepth`, turning a negative value into a clear error
+/// instead of serde's internal "expected usize" message.
+fn deserialize_max_depth<'de, D>(d: D) -> Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    // Accept both a number and a null.
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    match v {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => {
+            if let Some(u) = n.as_u64() {
+                Ok(Some(u as usize))
+            } else if n.as_i64().is_some_and(|i| i < 0) {
+                Err(D::Error::custom(
+                    "maxDepth must be a non-negative integer, got a negative number",
+                ))
+            } else {
+                Err(D::Error::custom("maxDepth must be a non-negative integer"))
+            }
+        }
+        Some(_) => Err(D::Error::custom("maxDepth must be a non-negative integer")),
+    }
 }
 
 impl Default for Options {
@@ -116,6 +143,30 @@ fn common_ancestor(paths: &[PathBuf]) -> PathBuf {
     out
 }
 
+/// Normalize a relative path, resolving `.` and `..` segments.
+/// Returns `None` when the path would climb above its own root, i.e. when
+/// it escapes the working directory.
+fn normalize_rel(rel: &Path) -> Option<PathBuf> {
+    let mut stack: Vec<std::ffi::OsString> = Vec::new();
+    for comp in rel.components() {
+        match comp {
+            std::path::Component::Normal(s) => stack.push(s.to_os_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                // Escapes the root: the pattern reaches outside the cwd.
+                stack.pop()?;
+            }
+            // An absolute path or a Windows prefix/root escapes the cwd.
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    let mut out = PathBuf::new();
+    for s in stack {
+        out.push(s);
+    }
+    Some(out)
+}
+
 /// Expand a glob pattern into the variant forms needed for conventional
 /// zero-directory `/**/` semantics (`src/**/*.ts` also matches `src/a.ts`,
 /// `**/*.ts` also matches `a.ts`), plus directory-prefix semantics for
@@ -134,21 +185,38 @@ fn expand_pattern(pattern: &str) -> Vec<String> {
         if let Some(rest) = p.strip_prefix("**/") {
             work.push(rest.to_string());
         }
-        if let Some(prefix) = p.strip_suffix("/**") {
-            work.push(prefix.to_string());
-        }
-    }
-    if !pattern.chars().any(|c| "*?{[".contains(c)) {
-        let trimmed = pattern.trim_end_matches('/');
-        out.push(format!("{trimmed}/**"));
     }
     out
 }
 
-fn build_glob_set(patterns: &[String]) -> Result<globset::GlobSet, String> {
+/// Build the glob set for a list of patterns.
+///
+/// A magic-free pattern names exactly one path, and whether that path is a
+/// file or a directory changes what it should match:
+///
+/// * naming a *file* (`top.ts`, `src/a.ts`) matches just that file;
+/// * naming a *directory* (`src`) matches the directory itself — and, to
+///   keep `hyperglob('src')` useful, also everything under it.
+///
+/// fast-glob resolves the same way: `fg('src', {onlyFiles:false})` is
+/// `["src"]` and `fg('src', {onlyFiles:true})` is `[]`, because a
+/// directory is not a file. Hyperglob's `onlyFiles` filter removes
+/// directories from the result, so matching the contents as well keeps
+/// `onlyFiles:true` meaningful (it yields the files inside `src/`).
+fn build_glob_set(patterns: &[String], cwd: &Path) -> Result<globset::GlobSet, String> {
     let mut builder = globset::GlobSetBuilder::new();
     for p in patterns {
-        for variant in expand_pattern(p) {
+        let mut variants = expand_pattern(p);
+        // Directory-prefix semantics for a magic-free pattern that names a
+        // directory.
+        if !p.chars().any(|c| "*?{[".contains(c)) {
+            let trimmed = p.trim_end_matches('/');
+            let abs = cwd.join(trimmed);
+            if abs.is_dir() {
+                variants.push(format!("{trimmed}/**"));
+            }
+        }
+        for variant in variants {
             let glob = globset::GlobBuilder::new(&variant)
                 .literal_separator(true)
                 .build()
@@ -156,7 +224,9 @@ fn build_glob_set(patterns: &[String]) -> Result<globset::GlobSet, String> {
             builder.add(glob);
         }
     }
-    builder.build().map_err(|e| format!("invalid glob patterns: {e}"))
+    builder
+        .build()
+        .map_err(|e| format!("invalid glob patterns: {e}"))
 }
 
 pub(crate) fn set_matches(set: &globset::GlobSet, rel: &str) -> bool {
@@ -209,6 +279,23 @@ impl Engine {
                 }
             })
             .collect();
+        // A pattern may not reach outside the working directory. `..`
+        // segments would otherwise make the walk escape the cwd and return
+        // files the caller never asked for (and that their ignore rules do
+        // not cover).
+        let mut escaping: Vec<&str> = Vec::new();
+        for p in &query.patterns {
+            let sp = static_prefix(p);
+            if normalize_rel(&sp).is_none() {
+                escaping.push(p.as_str());
+            }
+        }
+        if !escaping.is_empty() {
+            return Err(format!(
+                "pattern escapes the working directory: {}",
+                escaping.join(", ")
+            ));
+        }
         let root_rel = common_ancestor(&static_dirs);
         let root_depth = root_rel.components().count();
         let walk_root_rel = root_rel.to_string_lossy().replace('\\', "/");
@@ -217,15 +304,19 @@ impl Engine {
         } else {
             cwd.join(&root_rel)
         };
-        let positive_set = build_glob_set(&query.patterns)?;
-        let negative_set = build_glob_set(&query.negatives)?;
+        let positive_set = build_glob_set(&query.patterns, &cwd)?;
+        let negative_set = build_glob_set(&query.negatives, &cwd)?;
         let mut ignore_patterns = options.ignore.clone();
-        if options.index {
-            // The index's own directory must never leak into indexed results.
-            ignore_patterns.push(".hyperglob".to_string());
-            ignore_patterns.push(".hyperglob/**".to_string());
-        }
-        let ignore_set = build_glob_set(&ignore_patterns)?;
+        // The index's own directory must never leak into results. This is
+        // excluded unconditionally — not only when `index: true` — so that a
+        // live scan and a warm-index scan of the same tree always return the
+        // same set. Otherwise the answer would depend on whether the cache
+        // happened to be warm, and a file created by the cache itself
+        // (`.hyperglob/index.json`) would appear in one path and not the
+        // other.
+        ignore_patterns.push(".hyperglob".to_string());
+        ignore_patterns.push(".hyperglob/**".to_string());
+        let ignore_set = build_glob_set(&ignore_patterns, &cwd)?;
         let stats_requested = options.stats;
         let has_meta_selectors = query
             .selectors
@@ -376,8 +467,11 @@ impl Engine {
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_string();
+            // One context per file: the AST parse is memoized, so a query
+            // carrying both :exports and :imports parses the file once.
+            let mut ctx = crate::selectors::FileContext::new(&bytes, &ext);
             for sel in &self.query.selectors {
-                if sel.needs_content() && !sel.eval_content_ext(&bytes, &ext) {
+                if sel.needs_content() && !sel.eval_with(&mut ctx) {
                     return None;
                 }
             }
@@ -425,11 +519,80 @@ impl Engine {
 
     // ---------- traversal ----------
 
+    /// Evaluate the walk root itself as a candidate directory.
+    ///
+    /// A pattern that names a directory (`src`) should report that
+    /// directory, matching fast-glob. The root is only reported when it
+    /// actually matches the pattern; the walk root is usually the *parent*
+    /// of the pattern's static base (e.g. `src/a.ts` walks `src/` but does
+    /// not match `src/` itself).
+    fn eval_walk_root(&self, light: bool) -> Option<Entry> {
+        // The walk root is only a candidate when it is exactly the path a
+        // pattern names — not when it is an ancestor of it.
+        let rel = self.walk_root_rel.clone();
+        if rel.is_empty() {
+            // The walk root is the cwd itself. A pattern would have to be
+            // `.` or `**` to name it; `**` already matches via the walk.
+            return None;
+        }
+        if !set_matches(&self.positive_set, &rel) {
+            return None;
+        }
+        if set_matches(&self.negative_set, &rel) {
+            return None;
+        }
+        if set_matches(&self.ignore_set, &rel) {
+            return None;
+        }
+        let path = self.walk_root.clone();
+        let md = std::fs::metadata(&path).ok()?;
+        let modified_ms = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let want_metadata = self.has_meta_selectors || (!light && self.stats_requested);
+        let size = if want_metadata { md.len() } else { 0 };
+        for sel in &self.query.selectors {
+            if !sel.eval_metadata(size, modified_ms) {
+                return None;
+            }
+        }
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let extension = path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Some(Entry {
+            path: path.to_string_lossy().into_owned(),
+            relative_path: rel,
+            name,
+            extension,
+            size,
+            modified_ms,
+            is_file: false,
+            is_dir: true,
+            content: None,
+        })
+    }
+
     /// Run the walk, sending batches of matching entries on `tx`.
     /// In light mode only `relative_path` is populated (pathsOnly fast path).
     pub fn run_batched(&self, tx: crossbeam_channel::Sender<Vec<Entry>>, light: bool) {
         let global = self.global_matcher().map(Arc::new);
         let stack = self.initial_stack();
+        // The walk root is itself a candidate. A pattern like `src` names
+        // the directory `src`, and fast-glob returns that directory rather
+        // than its contents. Without this the root would never be reported.
+        if !self.options.only_files {
+            if let Some(e) = self.eval_walk_root(light) {
+                let _ = tx.send(vec![e]);
+            }
+        }
         let walker = Walker {
             eng: self,
             global,
@@ -439,6 +602,10 @@ impl Engine {
         let threads = self.options.threads;
         let run = || {
             rayon::scope(|scope| {
+                // The walk root has no ancestors within the walk, so the
+                // chain starts empty. Each descent adds the directory being
+                // left, which is what makes a symlink back to an ancestor
+                // detectable.
                 // Depth is counted from the walk root (the patterns' static
                 // base), matching fast-glob's `deep` semantics: with
                 // `src/**/*.ts` + maxDepth 2, files in src/ and src/a/ match.
@@ -448,6 +615,7 @@ impl Engine {
                     self.walk_root_rel.clone(),
                     0,
                     Arc::new(stack),
+                    Arc::new(Vec::new()),
                 );
             });
         };
@@ -505,6 +673,43 @@ struct Walker<'e> {
     light: bool,
 }
 
+/// A directory's identity, used to detect symlink cycles.
+///
+/// On Unix this is the device/inode pair. On Windows the file index is not
+/// readily available through `std`, so the canonicalized path is used
+/// instead — `std::fs::canonicalize` resolves junctions and symlinks, so a
+/// cycle still shows up as a repeated path.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DirId {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+    path: PathBuf,
+}
+
+impl DirId {
+    fn of(path: &Path) -> Option<DirId> {
+        // `canonicalize` resolves symlinks and junctions, so two paths that
+        // name the same directory produce the same id.
+        let resolved = std::fs::canonicalize(path).ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let md = std::fs::metadata(&resolved).ok()?;
+            Some(DirId {
+                dev: md.dev(),
+                ino: md.ino(),
+                path: resolved,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Some(DirId { path: resolved })
+        }
+    }
+}
+
 const BATCH: usize = 1024;
 const PAR_FILE_THRESHOLD: usize = 512;
 
@@ -514,7 +719,10 @@ enum Classified {
     Dir {
         rel: String,
         path: PathBuf,
-        dent: std::fs::DirEntry,
+        // Boxed: `std::fs::DirEntry` is by far the largest field, and
+        // unboxing it made the whole enum ~664 bytes, which is copied
+        // around for every directory entry in the tree.
+        dent: Box<std::fs::DirEntry>,
         depth: usize,
     },
 }
@@ -600,7 +808,7 @@ impl<'e> Walker<'e> {
             Classified::Dir {
                 rel: child_rel,
                 path,
-                dent,
+                dent: Box::new(dent),
                 depth: child_depth,
             }
         } else if is_file {
@@ -628,9 +836,21 @@ impl<'e> Walker<'e> {
         rel_dir: String,
         dir_depth: usize,
         stack: Arc<Vec<Gitignore>>,
+        ancestors: Arc<Vec<DirId>>,
     ) where
         'e: 's,
     {
+        // `ancestors` holds the strict ancestors of `abs_dir`. If
+        // `abs_dir` resolves to one of them (i.e. it is a symlink or
+        // junction pointing back up the tree), descending would loop
+        // forever, so stop here.
+        if self.eng.options.follow_symlinks {
+            if let Some(id) = DirId::of(&abs_dir) {
+                if ancestors.contains(&id) {
+                    return;
+                }
+            }
+        }
         let rd = match std::fs::read_dir(&abs_dir) {
             Ok(r) => r,
             Err(_) => return,
@@ -645,7 +865,7 @@ impl<'e> Walker<'e> {
         let mut out: Vec<Entry> = Vec::new();
         let classified: Vec<Classified> = if raw.len() > PAR_FILE_THRESHOLD {
             let dirs: std::sync::Mutex<Vec<Classified>> = std::sync::Mutex::new(Vec::new());
-            let mut entries: Vec<Entry> = raw
+            let entries: Vec<Entry> = raw
                 .into_par_iter()
                 .fold(Vec::new, |mut acc, dent| {
                     match self.classify(&stack, &rel_dir, dir_depth, dent) {
@@ -705,17 +925,27 @@ impl<'e> Walker<'e> {
                             out.push(e);
                         }
                     }
-                    let can_descend = opts.max_depth.map_or(true, |md| child_depth < md);
+                    let can_descend = opts.max_depth.is_none_or(|md| child_depth < md);
                     if can_descend {
-                        let child_stack =
-                            match self.eng.matcher_for_dir(&path, false) {
-                                Some(m) => {
-                                    let mut v = (*stack).clone();
-                                    v.push(m);
-                                    Arc::new(v)
-                                }
-                                None => stack.clone(),
-                            };
+                        let child_stack = match self.eng.matcher_for_dir(&path, false) {
+                            Some(m) => {
+                                let mut v = (*stack).clone();
+                                v.push(m);
+                                Arc::new(v)
+                            }
+                            None => stack.clone(),
+                        };
+                        // The child's strict ancestors are this directory plus
+                        // this directory's own ancestors. Recording them lets
+                        // a symlink pointing back up the tree be detected.
+                        let child_ancestors = match DirId::of(&abs_dir) {
+                            Some(id) => {
+                                let mut v = (*ancestors).clone();
+                                v.push(id);
+                                Arc::new(v)
+                            }
+                            None => ancestors.clone(),
+                        };
                         let walker_tx = self.tx.clone();
                         let walker_global = self.global.clone();
                         let eng = self.eng;
@@ -727,7 +957,14 @@ impl<'e> Walker<'e> {
                                 tx: walker_tx,
                                 light,
                             };
-                            child.visit(s, path, child_rel, child_depth, child_stack);
+                            child.visit(
+                                s,
+                                path,
+                                child_rel,
+                                child_depth,
+                                child_stack,
+                                child_ancestors,
+                            );
                         });
                     }
                 }

@@ -52,19 +52,30 @@ pub struct NativeBatch {
     pub done: bool,
 }
 
+#[napi(object)]
+pub struct NativePathBatch {
+    /// Relative paths, NUL-joined into one string (the same columnar trick
+    /// the sync path uses, so a batch crosses the N-API boundary once).
+    pub paths: String,
+    pub done: bool,
+}
+
 fn parse_options(options_json: Option<String>) -> Result<Options> {
     match options_json {
         Some(s) if !s.trim().is_empty() => serde_json::from_str::<Options>(&s)
-            .map_err(|e| Error::from_reason(format!("invalid options JSON: {e}"))),
+            // Surface the underlying message directly. The "invalid options
+            // JSON" prefix added noise without helping: serde already says
+            // which field was wrong, and our own deserializers produce a
+            // complete sentence.
+            .map_err(|e| Error::from_reason(e.to_string())),
         _ => Ok(Options::default()),
     }
 }
 
 fn build_engine(patterns: Vec<String>, options_json: Option<String>) -> Result<Engine> {
     let options = parse_options(options_json)?;
-    let eng = Engine::new(&patterns, options)
-        .map_err(|e| Error::from_reason(e))?;
-    engine::ensure_walk_root_exists(&eng).map_err(|e| Error::from_reason(e))?;
+    let eng = Engine::new(&patterns, options).map_err(Error::from_reason)?;
+    engine::ensure_walk_root_exists(&eng).map_err(Error::from_reason)?;
     Ok(eng)
 }
 
@@ -259,20 +270,114 @@ pub fn create_scanner(patterns: Vec<String>, options_json: Option<String>) -> Re
     })
 }
 
+/// Streaming scanner that yields relative paths only.
+///
+/// This exists so that `pathsOnly` streaming is genuinely incremental. The
+/// previous implementation ran a full `scanPathsSync` and then split the
+/// result, which meant the entire result set was materialized in memory
+/// before the first `yield` — the opposite of what a streaming API promises.
+#[napi]
+pub struct PathsScanner {
+    rx: Arc<Mutex<Option<crossbeam_channel::Receiver<Vec<engine::Entry>>>>>,
+    buffer: Arc<Mutex<std::collections::VecDeque<String>>>,
+    finished: Arc<AtomicBool>,
+}
+
+#[napi]
+impl PathsScanner {
+    /// Pull the next batch of relative paths, NUL-joined.
+    /// `done: true` (with whatever paths remain) means the traversal has
+    /// finished and the channel is drained.
+    #[napi]
+    pub fn next_batch(&self, max: Option<u32>) -> NativePathBatch {
+        let max = max.unwrap_or(256).max(1) as usize;
+        let mut paths: Vec<String> = Vec::with_capacity(max);
+        {
+            let mut buffer = self.buffer.lock().unwrap();
+            while paths.len() < max {
+                if let Some(p) = buffer.pop_front() {
+                    paths.push(p);
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut done = false;
+        if paths.is_empty() && !self.finished.load(Ordering::SeqCst) {
+            let guard = self.rx.lock().unwrap();
+            if let Some(rx) = guard.as_ref() {
+                match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(batch) => {
+                        let mut buffer = self.buffer.lock().unwrap();
+                        for e in batch {
+                            buffer.push_back(e.relative_path);
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        done = true;
+                    }
+                }
+            } else {
+                done = true;
+            }
+            if done && paths.is_empty() {
+                self.finished.store(true, Ordering::SeqCst);
+            }
+        }
+        if self.finished.load(Ordering::SeqCst) && paths.is_empty() {
+            done = true;
+        }
+        NativePathBatch {
+            paths: paths.join("\0"),
+            done,
+        }
+    }
+
+    /// Stop the scan early. Dropping the receiver makes walker sends fail
+    /// and the traversal winds down.
+    #[napi]
+    pub fn close(&self) {
+        let mut guard = self.rx.lock().unwrap();
+        *guard = None;
+        self.finished.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Create a streaming paths-only scanner for the given pattern queries.
+#[napi]
+pub fn create_paths_scanner(
+    patterns: Vec<String>,
+    options_json: Option<String>,
+) -> Result<PathsScanner> {
+    let eng = build_engine(patterns, options_json)?;
+    let (tx, rx) = crossbeam_channel::unbounded::<Vec<engine::Entry>>();
+    std::thread::spawn(move || {
+        // `light = true` skips per-file stat calls and content reads: only
+        // the relative path is populated.
+        eng.run_batched(tx, true);
+    });
+    Ok(PathsScanner {
+        rx: Arc::new(Mutex::new(Some(rx))),
+        buffer: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+        finished: Arc::new(AtomicBool::new(false)),
+    })
+}
+
 /// Import-graph query: every JS/TS file under cwd that imports `target`
 /// (a cwd-relative path) directly or transitively, as one NUL-joined
 /// string of relative paths.
 #[napi]
 pub fn dependents_of_sync(target: String, options_json: Option<String>) -> Result<String> {
     let options = parse_options(options_json)?;
-    let deps = graph::dependents_of(options, &target).map_err(|e| Error::from_reason(e))?;
+    let deps = graph::dependents_of(options, &target).map_err(Error::from_reason)?;
     Ok(deps.join("\0"))
 }
 
 /// Debug/introspection helper: parse a query and return its structure as JSON.
 #[napi]
 pub fn parse_query_json(input: String) -> Result<String> {
-    let q = selectors::parse_query(&input).map_err(|e| Error::from_reason(e))?;
+    let q = selectors::parse_query(&input).map_err(Error::from_reason)?;
     let selectors_dbg: Vec<String> = q.selectors.iter().map(|s| format!("{s:?}")).collect();
     let out = serde_json::json!({
         "patterns": q.patterns,
@@ -284,6 +389,10 @@ pub fn parse_query_json(input: String) -> Result<String> {
 
 #[napi]
 pub fn version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    // HYPERGLOB_VERSION is injected by build.rs from the npm package version
+    // (package.json), which is the single source of truth. It falls back to the
+    // crate version when the crate is built without the npm build script.
+    option_env!("HYPERGLOB_VERSION")
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+        .to_string()
 }
-

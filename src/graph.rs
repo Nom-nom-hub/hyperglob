@@ -18,8 +18,10 @@ const RESOLVE_EXTS: [&str; 9] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", 
 /// selector uses, in capture form.
 fn fallback_import_sources(bytes: &[u8]) -> Vec<String> {
     static RE: std::sync::LazyLock<regex::bytes::Regex> = std::sync::LazyLock::new(|| {
-        regex::bytes::Regex::new(r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]([^'"]+)['"]"#)
-            .unwrap()
+        regex::bytes::Regex::new(
+            r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]([^'"]+)['"]"#,
+        )
+        .unwrap()
     });
     let mut out = Vec::new();
     for cap in RE.captures_iter(bytes) {
@@ -101,7 +103,7 @@ fn resolve_bare(
             score += 1;
         }
         let entry = (score, usize::MAX - cand.len(), cand);
-        if best.map_or(true, |b| entry.0 > b.0 || (entry.0 == b.0 && entry.1 > b.1)) {
+        if best.is_none_or(|b| entry.0 > b.0 || (entry.0 == b.0 && entry.1 > b.1)) {
             best = Some(entry);
         }
     }

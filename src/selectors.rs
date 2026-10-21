@@ -51,8 +51,8 @@ impl CmpOp {
 pub enum Selector {
     ContainsLiteral(Vec<u8>),
     ContainsRegex(Regex),
-    Exports(String, Regex),
-    Imports(String, Regex),
+    Exports(String),
+    Imports(String),
     HasKey(Vec<String>),
     Size(CmpOp, u64),
     Modified(CmpOp, i64), // epoch milliseconds (UTC)
@@ -72,31 +72,38 @@ impl Selector {
 
     /// Evaluate a content selector against raw file bytes (assumes a `.ts`
     /// source type for AST selectors; the engine passes the real extension).
+    #[cfg(test)]
     pub fn eval_content(&self, bytes: &[u8]) -> bool {
-        self.eval_content_ext(bytes, "ts")
+        let mut ctx = FileContext::new(bytes, "ts");
+        self.eval_with(&mut ctx)
     }
 
-    /// Evaluate a content selector, using `ext` (no dot) to pick the AST
-    /// language for :exports/:imports. When the file parses as JS/TS the AST
-    /// is authoritative (comments and strings cannot false-positive); the
-    /// bundled regex is only a fallback for other or unparseable files.
-    pub fn eval_content_ext(&self, bytes: &[u8], ext: &str) -> bool {
+    /// Evaluate a content selector against an already-built file context.
+    /// The context memoizes the AST parse, so a query carrying both
+    /// `:exports` and `:imports` parses the file only once.
+    pub fn eval_with(&self, ctx: &mut FileContext<'_>) -> bool {
         match self {
             Selector::ContainsLiteral(needle) => {
-                !needle.is_empty() && memchr::memmem::find(bytes, needle).is_some()
+                !needle.is_empty() && memchr::memmem::find(ctx.bytes, needle).is_some()
             }
-            Selector::ContainsRegex(re) => re.is_match(bytes),
-            Selector::Exports(name, re) => match ast_module_info(bytes, ext) {
+            Selector::ContainsRegex(re) => re.is_match(ctx.bytes),
+            Selector::Exports(name) => match ctx.module_info() {
                 Some((exports, _)) => exports.contains(name),
-                None => re.is_match(bytes),
+                // The file could not be parsed at all. Fall back to a regex
+                // signature over a *masked* copy of the source in which
+                // comment and string-literal contents are blanked out, so
+                // export-shaped text that only exists inside a comment or a
+                // string cannot produce a false positive.
+                None => match build_exports_regex(name) {
+                    Ok(re) => re.is_match(ctx.masked_source().as_bytes()),
+                    Err(_) => false,
+                },
             },
-            Selector::Imports(name, re) => match ast_module_info(bytes, ext) {
-                Some((_, imports)) => imports
-                    .iter()
-                    .any(|src| src == name || src.starts_with(&format!("{name}/"))),
-                None => re.is_match(bytes),
-            },
-            Selector::HasKey(path) => eval_has_key(bytes, path),
+            Selector::Imports(name) => ctx
+                .module_sources()
+                .iter()
+                .any(|src| src == name || src.starts_with(&format!("{name}/"))),
+            Selector::HasKey(path) => eval_has_key(ctx.bytes, path),
             _ => true,
         }
     }
@@ -135,12 +142,95 @@ fn eval_has_key(bytes: &[u8], path: &[String]) -> bool {
     true
 }
 
+/// Per-file evaluation context.
+///
+/// It memoizes the AST parse and the module-specifier set, so a query that
+/// carries both `:exports` and `:imports` reads and parses each file at most
+/// once.
+pub struct FileContext<'a> {
+    bytes: &'a [u8],
+    ext: String,
+    module: Option<Option<(HashSet<String>, HashSet<String>)>>,
+    masked: Option<String>,
+    sources: Option<Vec<String>>,
+}
+
+impl<'a> FileContext<'a> {
+    pub fn new(bytes: &'a [u8], ext: &str) -> Self {
+        FileContext {
+            bytes,
+            ext: ext.to_string(),
+            module: None,
+            masked: None,
+            sources: None,
+        }
+    }
+
+    /// The AST module info, or None when the file could not be parsed.
+    fn module_info(&mut self) -> Option<&(HashSet<String>, HashSet<String>)> {
+        if self.module.is_none() {
+            self.module = Some(ast_module_info(self.bytes, &self.ext));
+        }
+        self.module.as_ref().and_then(|m| m.as_ref())
+    }
+
+    /// The source with comment and string-literal contents blanked out.
+    fn masked_source(&mut self) -> &str {
+        if self.masked.is_none() {
+            self.masked = Some(scan_js(self.bytes).mask);
+        }
+        self.masked.as_deref().unwrap_or("")
+    }
+
+    /// Every module specifier the file depends on, sorted and de-duplicated.
+    ///
+    /// The authoritative source is the AST plus the token stream: comments
+    /// and string literals cannot masquerade as import sites. Only when the
+    /// file cannot be parsed *or* lexed at all do we fall back to a masked
+    /// regex scan, which blanks out comments and strings first.
+    fn module_sources(&mut self) -> &[String] {
+        if self.sources.is_none() {
+            let mut v: Vec<String> = Vec::new();
+            if let Some((_, imports)) = self.module_info() {
+                v.extend(imports.iter().cloned());
+            } else {
+                let mut calls = HashSet::new();
+                if collect_call_sources(self.bytes, &self.ext, &mut calls) {
+                    v.extend(calls);
+                } else {
+                    // Last resort: masked regex scan.
+                    let masked = self.masked_source().to_string();
+                    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+                        Regex::new(
+                            r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]([^'"]+)['"]"#,
+                        )
+                        .unwrap()
+                    });
+                    v.extend(
+                        RE.captures_iter(masked.as_bytes())
+                            .filter_map(|cap| cap.get(1))
+                            .map(|m| String::from_utf8_lossy(m.as_bytes()).into_owned()),
+                    );
+                }
+            }
+            v.sort();
+            v.dedup();
+            self.sources = Some(v);
+        }
+        self.sources.as_deref().unwrap_or(&[])
+    }
+}
+
 /// Parse a JS/TS module with oxc and collect (exported names, import
 /// sources). Exported names include "default" for default exports and the
 /// declared names behind `export default function foo() {}` / re-export
-/// specifiers (`export { a as b }` exports `b`). Returns None when the
-/// extension is not JS/TS, the bytes are not UTF-8, or parsing reports
-/// errors — callers then fall back to regex signatures.
+/// specifiers (`export { a as b }` exports `b`).
+///
+/// Returns None when the extension is not JS/TS, the bytes are not UTF-8,
+/// or the parser hit a *fatal* error (it could not produce a usable AST) Ã¢â‚¬â€
+/// callers then fall back to a masked regex signature. Recoverable syntax
+/// errors still yield a usable AST, so a single stray token does not
+/// downgrade an entire file to the heuristic path.
 pub fn ast_module_info(bytes: &[u8], ext: &str) -> Option<(HashSet<String>, HashSet<String>)> {
     use oxc_ast::ast::*;
     let dummy = format!("file.{ext}");
@@ -148,7 +238,7 @@ pub fn ast_module_info(bytes: &[u8], ext: &str) -> Option<(HashSet<String>, Hash
     let text = std::str::from_utf8(bytes).ok()?;
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, text, source_type).parse();
-    if !parsed.diagnostics.is_empty() {
+    if parsed.fatal_error {
         return None;
     }
 
@@ -242,25 +332,229 @@ pub fn ast_module_info(bytes: &[u8], ext: &str) -> Option<(HashSet<String>, Hash
             _ => {}
         }
     }
-    // Import declarations are AST nodes; require()/dynamic import() calls are
-    // expressions, so merge them in with a targeted scan. (Compiled once —
-    // a per-file Regex::new here cost ~200us x N files and dominated the
-    // whole AST path.)
-    static CALL_RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r#"(?:require|import)\(\s*['"]([^'"]+)['"]"#).unwrap());
-    for cap in CALL_RE.captures_iter(bytes) {
-        if let Some(m) = cap.get(1) {
-            imports.insert(String::from_utf8_lossy(m.as_bytes()).into_owned());
-        }
+    // Static `import`/`export ... from` specifiers are AST nodes; the
+    // `require(...)` / `import(...)` call forms are collected from the token
+    // stream below.
+    let mut calls = HashSet::new();
+    if collect_call_sources(bytes, ext, &mut calls) {
+        imports.extend(calls);
     }
     Some((exports, imports))
 }
 
+/// Collect module specifiers from `require(...)` and dynamic `import(...)`
+/// calls using oxc's *token* stream.
+///
+/// Working at the token level (rather than with a regex over raw bytes) is
+/// what makes this exact: comments are lexed as trivia and therefore never
+/// appear in the token stream, and a string literal is a single `Str` token
+/// rather than a sequence of source characters. A file that merely *mentions*
+/// `require('react')` inside a comment or a string is therefore correctly
+/// reported as not importing react.
+///
+/// Returns false when the source cannot be lexed at all, in which case the
+/// caller falls back to a masked regex signature.
+fn collect_call_sources(bytes: &[u8], ext: &str, out: &mut HashSet<String>) -> bool {
+    use oxc_parser::Kind;
+
+    let text = match std::str::from_utf8(bytes) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let source_type =
+        match oxc_span::SourceType::from_path(std::path::Path::new(&format!("file.{}", ext))) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, text, source_type)
+        .with_config(oxc_parser::config::TokensParserConfig)
+        .parse();
+
+    // `tokens` is in source order and excludes trivia (comments).
+    let tokens = &parsed.tokens;
+    let n = tokens.len();
+    let mut i = 0usize;
+    while i < n {
+        match tokens[i].kind() {
+            // `import ... from 'x'` and `export ... from 'x'`: the module
+            // specifier is the `Str` token right after `from`.
+            Kind::From => {
+                if !is_member_access(tokens, i) {
+                    if let Some(src) = string_at(tokens, i + 1, text) {
+                        out.insert(src);
+                    }
+                }
+                i += 1;
+            }
+            // `import 'x'` (side-effect import) and dynamic `import('x')`.
+            //
+            // A `Str` token directly after `import` is a side-effect import
+            // (`import 'x'`). A dynamic import is `import` followed by `(`,
+            // so the specifier is the `Str` after the paren. Either way the
+            // specifier is the next `Str` token, which we find by skipping
+            // the paren.
+            Kind::Import => {
+                if !is_member_access(tokens, i) {
+                    let mut j = i + 1;
+                    if j < n && tokens[j].kind() == Kind::LParen {
+                        j += 1;
+                    }
+                    if let Some(src) = string_at(tokens, j, text) {
+                        out.insert(src);
+                    }
+                }
+                i += 1;
+            }
+            // `require('x')`: a `Str` token right after `require` and `(`.
+            //
+            // `require` is a contextual keyword, so it is also lexed as a
+            // plain identifier when used as a property name (`obj.require`).
+            // We therefore require the `(` to follow, and require that the
+            // `require` token is *not* preceded by `.` (a member access).
+            Kind::Require => {
+                if !is_member_access(tokens, i) {
+                    let mut j = i + 1;
+                    if j < n && tokens[j].kind() == Kind::LParen {
+                        j += 1;
+                        if let Some(src) = string_at(tokens, j, text) {
+                            out.insert(src);
+                        }
+                    }
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    true
+}
+
+/// True when the token at `at` is a property name in a member access
+/// (`obj.import`, `obj?.import`, `obj.from`). Such a token is a plain
+/// identifier, not the `import`/`from` keyword, so it must not start a
+/// module specifier.
+fn is_member_access(tokens: &[oxc_parser::Token], at: usize) -> bool {
+    if at == 0 {
+        return false;
+    }
+    matches!(
+        tokens[at - 1].kind(),
+        oxc_parser::Kind::Dot | oxc_parser::Kind::QuestionDot
+    )
+}
+
+/// The value of the string-literal token at index `at`, if that token is a
+/// string literal. The token span covers the quotes, which are stripped.
+fn string_at(tokens: &[oxc_parser::Token], at: usize, text: &str) -> Option<String> {
+    let tok = tokens.get(at)?;
+    if tok.kind() != oxc_parser::Kind::Str {
+        return None;
+    }
+    let span = tok.span();
+    let start = span.start as usize;
+    let end = span.end as usize;
+    let raw = text.get(start..end)?;
+    // Strip the surrounding quotes.
+    let trimmed = raw
+        .strip_prefix('"')
+        .or_else(|| raw.strip_prefix('\''))
+        .and_then(|s| s.strip_suffix('"').or_else(|| s.strip_suffix('\'')));
+    trimmed.map(|s| s.to_string())
+}
+
+/// A JavaScript-ish source with comment and string-literal contents blanked
+/// out. Used by the regex fallback so that export/import-shaped text living
+/// inside a comment or a string cannot produce a false positive.
+struct MaskedSource {
+    mask: String,
+}
+
+/// Blank out the contents of comments and string/template literals, keeping
+/// the surrounding structure (and byte offsets) intact.
+fn scan_js(bytes: &[u8]) -> MaskedSource {
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0usize;
+    let n = bytes.len();
+    while i < n {
+        let c = bytes[i];
+        match c {
+            b'/' if i + 1 < n && bytes[i + 1] == b'/' => {
+                // Line comment: blank to end of line.
+                while i < n && bytes[i] != b'\n' {
+                    out.push(' ');
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < n && bytes[i + 1] == b'*' => {
+                // Block comment: blank to the closing */.
+                out.push(' ');
+                out.push(' ');
+                i += 2;
+                while i < n {
+                    if bytes[i] == b'*' && i + 1 < n && bytes[i + 1] == b'/' {
+                        out.push(' ');
+                        out.push(' ');
+                        i += 2;
+                        break;
+                    }
+                    out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                    i += 1;
+                }
+            }
+            b'"' | b'\'' | b'`' => {
+                // String / template literal: blank the contents but keep the
+                // quotes so a regex looking for `require('x')` still needs a
+                // real call site to match.
+                let quote = c;
+                out.push(quote as char);
+                i += 1;
+                while i < n {
+                    let d = bytes[i];
+                    if d == b'\\' && i + 1 < n {
+                        out.push(' ');
+                        out.push(' ');
+                        i += 2;
+                        continue;
+                    }
+                    if d == quote {
+                        out.push(quote as char);
+                        i += 1;
+                        break;
+                    }
+                    out.push(if d == b'\n' { '\n' } else { ' ' });
+                    i += 1;
+                }
+            }
+            _ => {
+                // Copy a whole UTF-8 char.
+                let start = i;
+                let len = utf8_len(c);
+                i = (i + len).min(n);
+                out.push_str(&String::from_utf8_lossy(&bytes[start..i]));
+            }
+        }
+    }
+    MaskedSource { mask: out }
+}
+
+fn utf8_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b >> 5 == 0b110 {
+        2
+    } else if b >> 4 == 0b1110 {
+        3
+    } else if b >> 3 == 0b11110 {
+        4
+    } else {
+        1
+    }
+}
+
 fn build_imports_regex(name: &str) -> Result<Regex, String> {
     let esc = regex::escape(name);
-    let pat = format!(
-        r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]{esc}(?:/[^'"]*)?['"]"#
-    );
+    let pat = format!(r#"(?:from\s+|import\s+|require\(\s*|import\(\s*)['"]{esc}(?:/[^'"]*)?['"]"#);
     Regex::new(&pat).map_err(|e| e.to_string())
 }
 
@@ -321,7 +615,10 @@ fn unquote(raw: &str) -> (String, bool) {
         && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         let inner = &s[1..s.len() - 1];
-        let unescaped = inner.replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\");
+        let unescaped = inner
+            .replace("\\\"", "\"")
+            .replace("\\'", "'")
+            .replace("\\\\", "\\");
         return (unescaped, false);
     }
     (s.to_string(), false)
@@ -341,7 +638,9 @@ fn parse_op(s: &str) -> Result<(CmpOp, &str), String> {
     } else if let Some(r) = s.strip_prefix('=') {
         Ok((CmpOp::Eq, r))
     } else {
-        Err(format!("selector comparison needs an operator (<, <=, >, >=, =): {s}"))
+        Err(format!(
+            "selector comparison needs an operator (<, <=, >, >=, =): {s}"
+        ))
     }
 }
 
@@ -465,13 +764,21 @@ pub fn parse_selector(token: &str) -> Result<Selector, String> {
         }
         "exports" | "export" => {
             let (arg, _) = unquote(arg_raw);
-            let re = build_exports_regex(&arg)?;
-            Ok(Selector::Exports(arg, re))
+            if arg.is_empty() {
+                return Err("empty name in :exports".to_string());
+            }
+            // Validate the fallback signature eagerly so a bad name is
+            // reported at parse time rather than silently never matching.
+            build_exports_regex(&arg)?;
+            Ok(Selector::Exports(arg))
         }
         "imports" | "import" => {
             let (arg, _) = unquote(arg_raw);
-            let re = build_imports_regex(&arg)?;
-            Ok(Selector::Imports(arg, re))
+            if arg.is_empty() {
+                return Err("empty name in :imports".to_string());
+            }
+            build_imports_regex(&arg)?;
+            Ok(Selector::Imports(arg))
         }
         "has-key" | "haskey" | "hasKey" => {
             let (arg, _) = unquote(arg_raw);
@@ -578,11 +885,8 @@ mod tests {
     fn parses_has_key_and_negatives() {
         let q = parse_query(r#"src/**/*.json :has-key("dependencies.react")"#).unwrap();
         assert!(matches!(q.selectors[0], Selector::HasKey(_)));
-        let q2 = parse_queries(&[
-            "src/**/*.ts".to_string(),
-            "!src/**/*.test.ts".to_string(),
-        ])
-        .unwrap();
+        let q2 =
+            parse_queries(&["src/**/*.ts".to_string(), "!src/**/*.test.ts".to_string()]).unwrap();
         assert_eq!(q2.negatives, vec!["src/**/*.test.ts".to_string()]);
     }
 
