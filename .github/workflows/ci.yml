@@ -129,6 +129,12 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - name: build the native module
+        # The tarball ships the .node binary for the platform it was packed
+        # on (the "files" list includes hyperglob.*.node). Without this the
+        # tarball has no binary, the postinstall downloader has no release
+        # to fetch yet, and the installed package cannot load.
+        run: npm run build
       - name: pack
         run: npm pack
       - name: install the packed tarball into a scratch project
