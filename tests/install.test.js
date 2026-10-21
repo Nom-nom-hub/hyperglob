@@ -352,3 +352,84 @@ test('nativeFilename returns null for an unsupported platform and a known name o
     assert.match(f, /^hyperglob\..+\.node$/);
   }
 });
+
+// ---------------------------------------------------------------------------
+// The package check must be able to find npm on every platform.
+//
+// It used to capture `which npm` with stdout ignored, so the fallback
+// could never fire, and the directory guesses only covered the Windows
+// layout. On Linux -- the CI runner -- it failed with "could not locate
+// the npm CLI entry point" and took the whole job down.
+// ---------------------------------------------------------------------------
+
+test('the package checker can find npm on this platform', () => {
+  const checker = fs.readFileSync(
+    path.join(__dirname, '..', 'tools', 'check-package.mjs'),
+    'utf8'
+  );
+  // The lookup must actually read the launcher's output. It used to
+  // capture `which npm` with stdout ignored, so the fallback could never
+  // fire and the check only worked by luck on one platform.
+  const whichCall = checker.match(/spawnSync\([^)]*'which'\s*,\s*\['npm'\][^)]*\)/);
+  assert.ok(whichCall, 'the checker must shell out to which/where for npm');
+  assert.ok(
+    !/stdio:\s*\[\s*'ignore'\s*,\s*'ignore'\s*,\s*'ignore'\s*\]/.test(whichCall[0]),
+    'the npm lookup must not discard the output of which/where'
+  );
+  assert.ok(
+    /stdio:\s*\[\s*'ignore'\s*,\s*'pipe'/.test(whichCall[0]),
+    'the npm lookup must pipe the output of which/where'
+  );
+  // And it must know about the POSIX layout: <prefix>/lib/node_modules/npm.
+  assert.ok(
+    /'lib',\s*'node_modules',\s*'npm'/.test(checker),
+    'the npm lookup must try the lib/node_modules layout'
+  );
+});
+
+test('the npm launcher is resolved through a relative path', () => {
+  // Replicate the lookup against a fake POSIX prefix:
+  //   <tmp>/bin/npm                            (the launcher)
+  //   <tmp>/lib/node_modules/npm/bin/npm-cli.js (the CLI)
+  const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperglob-npm-'));
+  try {
+    fs.mkdirSync(path.join(fake, 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(fake, 'lib', 'node_modules', 'npm', 'bin'), { recursive: true });
+    const cli = path.join(fake, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    fs.writeFileSync(cli, '// cli\n');
+    const launcher = path.join(fake, 'bin', 'npm');
+    fs.writeFileSync(
+      launcher,
+      [
+        '#!/bin/sh',
+        'basedir=$(dirname "$0")',
+        'exec "$basedir/../lib/node_modules/npm/bin/npm-cli.js" "$@"',
+        '',
+      ].join('\n')
+    );
+
+    // The same two strategies the checker uses.
+    const text = fs.readFileSync(launcher, 'utf8');
+    let found = null;
+    for (const m of text.matchAll(/["']?([^\s"'$][^\s"']*npm-cli\.js)["']?/g)) {
+      const guess = path.isAbsolute(m[1]) ? m[1] : path.resolve(path.dirname(launcher), m[1]);
+      if (fs.existsSync(guess)) { found = guess; break; }
+    }
+    if (!found) {
+      const dir = path.dirname(launcher);
+      const rel = path.join('node_modules', 'npm', 'bin', 'npm-cli.js');
+      for (const g of [
+        path.join(dir, rel),
+        path.join(dir, '..', 'lib', rel),
+        path.join(dir, '..', rel),
+        path.join(dir, '..', '..', rel),
+      ]) {
+        if (fs.existsSync(g)) { found = path.resolve(g); break; }
+      }
+    }
+    assert.ok(found, 'the launcher must resolve to the CLI');
+    assert.equal(fs.realpathSync(found), fs.realpathSync(cli));
+  } finally {
+    fs.rmSync(fake, { recursive: true, force: true });
+  }
+});

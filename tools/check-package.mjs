@@ -58,27 +58,51 @@ function npmPackJson() {
 function findNpmCli() {
   const candidates = [];
   if (process.env.npm_execpath) candidates.push(process.env.npm_execpath);
-  // node.exe lives in <prefix>/; npm ships in <prefix>/node_modules/npm.
-  const prefix = path.dirname(process.execPath);
-  candidates.push(path.join(prefix, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
-  // A global install: <prefix>/lib/node_modules/npm/bin/npm-cli.js
-  candidates.push(path.join(prefix, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
-  candidates.push(path.join(prefix, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+
+  // node lives at <prefix>/bin/node (POSIX) or <prefix>\node.exe (Windows),
+  // and npm ships at <prefix>/lib/node_modules/npm (POSIX) or
+  // <prefix>\node_modules\npm (Windows). Try both prefixes.
+  const binDir = path.dirname(process.execPath);
+  const prefixes = [binDir, path.dirname(binDir)];
+  for (const p of prefixes) {
+    candidates.push(path.join(p, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+    candidates.push(path.join(p, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+  }
   for (const c of candidates) {
     if (c && fs.existsSync(c)) return c;
   }
-  // Fall back to whatever `npm` resolves to. The npm executable is a
-  // launcher script that sits next to the real CLI, but the layout differs:
-  // on Linux it is <prefix>/lib/node_modules/npm/bin/npm-cli.js while the
-  // launcher itself is <prefix>/bin/npm, and on Windows it is
-  // <prefix>/node_modules/npm/bin/npm-cli.js. Try both, and also walk up
-  // from the launcher directory to the prefix.
+
+  // Ask the `npm` launcher where its CLI is. The launcher is a shell script
+  // (POSIX) or a .cmd shim (Windows) that names npm-cli.js directly, so
+  // reading it is more reliable than guessing at the directory layout --
+  // which differs between a system install, a version manager, and a
+  // self-contained Node build.
   const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['npm'], {
     encoding: 'utf8',
-    stdio: ['ignore', 'ignore', 'ignore'],
+    // stdout MUST be piped: it carries the path to the launcher. Ignoring
+    // it would leave nothing to work with.
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (!which.error && which.stdout) {
     for (const first of which.stdout.split(/\r?\n/).filter(Boolean)) {
+      // The launcher names the CLI: npm-cli.js on Windows, lib/node_modules/
+      // npm/bin/npm-cli.js on POSIX. Pull the path out of the script.
+      try {
+        const text = fs.readFileSync(first, 'utf8');
+        // Only accept a path with no shell variables in it -- the POSIX
+        // launcher embeds one ("$basedir/../lib/..."), which is not a path
+        // we can open.
+        for (const m of text.matchAll(/["']?([^\s"'$][^\s"']*npm-cli\.js)["']?/g)) {
+          const guess = path.isAbsolute(m[1])
+            ? m[1]
+            : path.resolve(path.dirname(first), m[1]);
+          if (fs.existsSync(guess)) return guess;
+        }
+      } catch {
+        // The launcher may not be readable; fall through to the layout guesses.
+      }
+
+      // And the common layouts, in case the launcher is a binary.
       const dir = path.dirname(first);
       const rel = path.join('node_modules', 'npm', 'bin', 'npm-cli.js');
       const guesses = [
