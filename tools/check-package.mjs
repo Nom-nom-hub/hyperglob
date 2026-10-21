@@ -67,15 +67,29 @@ function findNpmCli() {
   for (const c of candidates) {
     if (c && fs.existsSync(c)) return c;
   }
-  // Fall back to whatever `npm` resolves to, converting npm.cmd -> npm-cli.js.
+  // Fall back to whatever `npm` resolves to. The npm executable is a
+  // launcher script that sits next to the real CLI, but the layout differs:
+  // on Linux it is <prefix>/lib/node_modules/npm/bin/npm-cli.js while the
+  // launcher itself is <prefix>/bin/npm, and on Windows it is
+  // <prefix>/node_modules/npm/bin/npm-cli.js. Try both, and also walk up
+  // from the launcher directory to the prefix.
   const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['npm'], {
     encoding: 'utf8',
     stdio: ['ignore', 'ignore', 'ignore'],
   });
   if (!which.error && which.stdout) {
     for (const first of which.stdout.split(/\r?\n/).filter(Boolean)) {
-      const guess = path.join(path.dirname(first), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-      if (fs.existsSync(guess)) return guess;
+      const dir = path.dirname(first);
+      const rel = path.join('node_modules', 'npm', 'bin', 'npm-cli.js');
+      const guesses = [
+        path.join(dir, rel),
+        path.join(dir, '..', 'lib', rel),
+        path.join(dir, '..', rel),
+        path.join(dir, '..', '..', rel),
+      ];
+      for (const g of guesses) {
+        if (fs.existsSync(g)) return path.resolve(g);
+      }
     }
   }
   throw new Error('could not locate the npm CLI entry point');

@@ -21,7 +21,31 @@ import fs from 'node:fs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const TEST_GLOB = 'tests/*.test.js';
+const TEST_DIR = path.join(ROOT, 'tests');
+
+/**
+ * Collect the test files.
+ *
+ * Node 22+ expands a glob pattern passed to `--test`; Node 18 and 20 do
+ * not, and fail with "Could not find '.../tests/*.test.js'". So the file
+ * list is always built here, and the runner is given explicit paths.
+ */
+function testFiles() {
+  if (!fs.existsSync(TEST_DIR)) {
+    console.error(`[run-tests] no tests directory at ${TEST_DIR}`);
+    process.exit(1);
+  }
+  const files = fs
+    .readdirSync(TEST_DIR)
+    .filter((f) => f.endsWith('.test.js'))
+    .sort()
+    .map((f) => path.join(TEST_DIR, f));
+  if (!files.length) {
+    console.error('[run-tests] no test files found');
+    process.exit(1);
+  }
+  return files;
+}
 
 function hasFlag(flag) {
   // allowedNodeEnvironmentFlags is a Set on every Node version that has it
@@ -38,7 +62,7 @@ const useIsolation = hasFlag(ISOLATION_FLAG);
 
 const args = ['--test'];
 if (useIsolation) args.push(ISOLATION_FLAG);
-args.push(TEST_GLOB);
+args.push(...testFiles());
 
 if (!useIsolation) {
   console.log(

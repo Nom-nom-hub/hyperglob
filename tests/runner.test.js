@@ -66,8 +66,22 @@ test('the detection agrees with the running Node', () => {
   assert.equal(claimed, real);
 });
 
-test('the runner forwards the test glob', () => {
-  assert.ok(/tests\/\*\.test\.js/.test(runner), 'the runner must run tests/*.test.js');
+test('the runner collects test files itself', () => {
+  // Node 18 and 20 do not expand a glob passed to `--test` and fail with
+  // "Could not find '.../tests/*.test.js'". The runner must therefore
+  // enumerate the files and pass explicit paths.
+  assert.ok(
+    /\.test\.js/.test(runner),
+    'the runner must select .test.js files'
+  );
+  assert.ok(
+    /readdirSync/.test(runner),
+    'the runner must enumerate the tests directory itself'
+  );
+  assert.ok(
+    !/args\.push\(['"]tests\/\*\.test\.js['"]\)/.test(runner),
+    'the runner must not pass a glob pattern to node --test'
+  );
 });
 
 test('the MCP stdio tests live in their own file', () => {
