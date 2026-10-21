@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hyperglob — AST-aware file discovery for agents</title>
+<meta name="description" content="A multi-threaded, AST-aware, zero-copy file discovery engine. One pass to discover, filter, and inspect files — with real :exports and :imports checks, native .gitignore support, and an MCP server for agents." />
+<meta property="og:title" content="hyperglob — AST-aware file discovery for agents" />
+<meta property="og:description" content="One pass to discover, filter, and inspect files. Real AST checks, native .gitignore support, an MCP server for agents." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html" aria-current="page">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a>
+      <a href="api.html">API</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="cli.html">CLI</a>
+      <a href="mcp.html">MCP</a>
+      <a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ───────────────────────────── Hero ───────────────────────────── -->
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow">Rust core · N-API bindings · no runtime dependencies</p>
+        <h1>Find the files you mean.<br /><span class="grad">Not the files that look like them.</span></h1>
+        <p class="lede">
+          Traditional globbing matches strings. hyperglob parses. Ask for the files that
+          <em>actually export</em> a symbol, or <em>actually import</em> a package, and you get
+          an AST-verified answer — evaluated during the crawl, not in a second pass.
+        </p>
+
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="getting-started.html">Get started</a>
+          <a class="btn btn-ghost" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            View source
+          </a>
+        </div>
+
+        <div class="install">
+          <div class="install-row">
+            <span class="install-label">npm</span>
+            <code class="install-cmd" data-copyable>npm install @blazeinstall/hyperglob</code>
+            <button class="copy-btn" type="button" data-copy aria-label="Copy install command"></button>
+          </div>
+          <p class="install-note">Prebuilt binaries for Linux, macOS, and Windows. No compiler needed.</p>
+        </div>
+      </div>
+
+      <!-- Terminal demo -->
+      <div class="hero-demo" aria-label="Example terminal session">
+        <div class="terminal">
+          <div class="terminal-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="terminal-title">hyperglob</span>
+          </div>
+          <div class="terminal-body">
+<pre class="term-code"><code><span class="c-prompt">$</span> <span class="c-cmd">hyperglob</span> <span class="c-str">'src/**/*.ts :exports("useServerHook")'</span>
+
+<span class="c-dim"># 3 files — verified by the parser,</span>
+<span class="c-dim"># not by grepping for the word.</span>
+<span class="c-out">src/hooks/use-server-hook.ts</span>
+<span class="c-out">src/app/hook.ts</span>
+<span class="c-out">src/components/Counter.tsx</span>
+
+<span class="c-prompt">$</span> <span class="c-cmd">hyperglob</span> <span class="c-str">'**/*.ts :imports("react")'</span> <span class="c-flag">--json</span>
+<span class="c-out">{ "count": 12, "total": 12, "entries": [ ... ] }</span>
+
+<span class="c-prompt">$</span> <span class="c-cmd">hyperglob</span> <span class="c-str">'src/**'</span> <span class="c-flag">--no-stats</span>
+<span class="c-dim"># .gitignore honoured automatically</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── The problem ───────────────────────────── -->
+  <section class="section problem">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">The problem</p>
+        <h2>Agents were built to read every file</h2>
+        <p class="section-lede">
+          Ask an agent to change a hook, and it globs, reads a hundred files, and greps for a
+          string. Every step is a guess that a string matcher cannot verify.
+        </p>
+      </div>
+
+      <div class="compare">
+        <div class="compare-col compare-bad">
+          <h3><span class="x" aria-hidden="true">✕</span> Glob + grep + read</h3>
+          <ul>
+            <li><code>grep -r "useServerHook"</code> matches comments, strings, and dead code.</li>
+            <li><code>export const x</code> in a comment looks exactly like an export.</li>
+            <li>Every candidate file is read into memory, then thrown away.</li>
+            <li>Three passes over the tree to answer one question.</li>
+          </ul>
+        </div>
+        <div class="compare-col compare-good">
+          <h3><span class="check" aria-hidden="true">✓</span> hyperglob</h3>
+          <ul>
+            <li>The parser runs <em>inside</em> the crawl. No second pass.</li>
+            <li>Comments and string literals are not exports. The AST knows.</li>
+            <li>Files are read once, in Rust, and filtered before crossing the boundary.</li>
+            <li>One pass. One allocation. Answer as you walk.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── Selectors ───────────────────────────── -->
+  <section class="section selectors">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">The query language</p>
+        <h2>Selectors that know what a file means</h2>
+        <p class="section-lede">
+          Append selectors to any glob. They compose with AND semantics, stack with
+          <code>!</code> negations, and all of it is evaluated in Rust during traversal.
+        </p>
+      </div>
+
+      <div class="selector-grid">
+        <article class="sel-card">
+          <div class="sel-head"><code>:exports("name")</code></div>
+          <p>Does this module <em>really</em> export that symbol?</p>
+          <p class="sel-note">Declarations, <code>export { a as b }</code>, re-exports, and default exports all count. Text in a comment does not.</p>
+        </article>
+
+        <article class="sel-card">
+          <div class="sel-head"><code>:imports("pkg")</code></div>
+          <p>Does this module depend on that package?</p>
+          <p class="sel-note">Covers <code>import</code>, <code>require()</code>, dynamic <code>import()</code>, and <code>export … from</code> — including subpaths like <code>react/jsx-runtime</code>.</p>
+        </article>
+
+        <article class="sel-card">
+          <div class="sel-head"><code>:contains("text")</code></div>
+          <p>Does the file contain this literal?</p>
+          <p class="sel-note">Searched with <code>memchr</code> inside the traversal. Use <code>:contains(/regex/)</code> or <code>:matches("re")</code> for patterns.</p>
+        </article>
+
+        <article class="sel-card">
+          <div class="sel-head"><code>:has-key("a.b.c")</code></div>
+          <p>Does this JSON file have that key?</p>
+          <p class="sel-note">Dotted paths and array indices work: <code>:has-key("deps.0.name")</code>.</p>
+        </article>
+
+        <article class="sel-card">
+          <div class="sel-head"><code>:size(&lt;100kb)</code></div>
+          <p>Filter by file size.</p>
+          <p class="sel-note">Evaluated at the stat step, so it costs nothing extra. Units: <code>b</code>, <code>kb</code>, <code>mb</code>, <code>gb</code>, <code>kib</code>, <code>mib</code>, <code>gib</code>.</p>
+        </article>
+
+        <article class="sel-card">
+          <div class="sel-head"><code>:modified(&gt;2026-10-01)</code></div>
+          <p>Filter by last-modified time.</p>
+          <p class="sel-note">UTC. Accepts <code>YYYY-MM-DD</code> and full ISO timestamps. Operators: <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>=</code>.</p>
+        </article>
+      </div>
+
+      <p class="section-foot">
+        <a href="selectors.html">Full selector reference →</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── Three surfaces ───────────────────────────── -->
+  <section class="section surfaces">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Three surfaces, one engine</p>
+        <h2>Use it however you already work</h2>
+      </div>
+
+      <div class="surface-grid">
+        <article class="surface">
+          <div class="surface-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 8-4 4 4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>
+          </div>
+          <h3>Node API</h3>
+          <p>Stream entries asynchronously, or batch them synchronously. A <code>pathsOnly</code> fast path skips entry construction entirely.</p>
+          <pre class="mini-code"><code><span class="c-kw">for await</span> (<span class="c-kw">const</span> e <span class="c-kw">of</span> <span class="c-fn">hyperglob</span>(<span class="c-str">'src/**/*.ts'</span>)) {
+  <span class="c-fn">console</span>.log(e.relativePath);
+}</code></pre>
+          <a class="surface-link" href="api.html">API reference →</a>
+        </article>
+
+        <article class="surface">
+          <div class="surface-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/></svg>
+          </div>
+          <h3>CLI</h3>
+          <p>Scriptable output, real exit codes, and flags for every option. JSON when you need it, plain paths when you don't.</p>
+          <pre class="mini-code"><code>$ hyperglob <span class="c-str">'**/*.ts :exports("x")'</span> \
+    <span class="c-flag">--json</span> <span class="c-flag">--ignore</span> <span class="c-str">'**/dist/**'</span></code></pre>
+          <a class="surface-link" href="cli.html">CLI reference →</a>
+        </article>
+
+        <article class="surface">
+          <div class="surface-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 1 4 4v1a2 2 0 0 1 2 2v1a4 4 0 0 1-4 4h-1v2a2 2 0 0 1-2 2"/><circle cx="12" cy="17" r="2"/><path d="M8 12H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1"/></svg>
+          </div>
+          <h3>MCP server</h3>
+          <p>Three tools — <code>hyperglob_query</code>, <code>hyperglob_paths</code>, <code>hyperglob_dependents</code> — for any MCP-speaking agent, with zero code on your side.</p>
+          <pre class="mini-code"><code>claude mcp add hyperglob \
+  <span class="c-flag">--</span> node /path/to/hyperglob/mcp.js</code></pre>
+          <a class="surface-link" href="mcp.html">MCP guide →</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── Benchmarks ───────────────────────────── -->
+  <section class="section bench">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Benchmarks</p>
+        <h2>Faster because it does less</h2>
+        <p class="section-lede">
+          Measured on a noisy shared 2-core Linux VM with an overlay filesystem — absolute
+          numbers will be far better on real hardware. The ratios are the point. Interleaved
+          rounds, medians of 7.
+        </p>
+      </div>
+
+      <div class="bench-grid">
+        <div class="bench-card">
+          <p class="bench-scenario">22k-file tree · <code>src/**/*.ts</code></p>
+          <table class="bench-table">
+            <thead><tr><th>Scenario</th><th>hyperglob</th><th>fast-glob</th></tr></thead>
+            <tbody>
+              <tr><td><code>pathsOnly</code> vs paths</td><td class="win">33.9 ms</td><td>52.1 ms</td></tr>
+              <tr><td>entries + stats</td><td class="win">103.9 ms</td><td>345.5 ms</td></tr>
+              <tr><td>full scan, gitignore, <code>pathsOnly</code></td><td class="win">33.4 ms</td><td>52.4 ms</td></tr>
+              <tr><td>path + <code>:contains</code> vs glob + read</td><td class="win">253.9 ms</td><td>3,296.6 ms</td></tr>
+            </tbody>
+          </table>
+          <p class="bench-note">The last row is the headline: <strong>13×</strong>, because glob-then-read touches every file twice while hyperglob filters in-flight.</p>
+        </div>
+
+        <div class="bench-card">
+          <p class="bench-scenario">110k-file tree · <code>src/**/*.ts</code></p>
+          <table class="bench-table">
+            <thead><tr><th>Scenario</th><th>hyperglob</th><th>fast-glob</th></tr></thead>
+            <tbody>
+              <tr><td><code>pathsOnly</code> vs paths</td><td class="win">237.4 ms</td><td>324.9 ms</td></tr>
+              <tr><td>entries + stats</td><td class="win">451.5 ms</td><td>1,263.0 ms</td></tr>
+              <tr><td><code>:contains</code> single pass vs glob + read</td><td class="win">1,266.1 ms</td><td>15,518.3 ms</td></tr>
+            </tbody>
+          </table>
+          <p class="bench-note">At scale the gap widens: <strong>12×</strong> on the content path, 2.8× on full entries.</p>
+        </div>
+      </div>
+
+      <p class="section-foot">
+        <a href="https://github.com/Nom-nom-hub/hyperglob#benchmarks" target="_blank" rel="noopener noreferrer">Full benchmark methodology →</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── Features ───────────────────────────── -->
+  <section class="section features">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Under the hood</p>
+        <h2>Built for the boring parts, too</h2>
+      </div>
+
+      <div class="feature-list">
+        <div class="feature">
+          <h3>Ignores what your repo ignores</h3>
+          <p><code>.gitignore</code>, <code>.ignore</code>, <code>.agentignore</code>, <code>.git/info/exclude</code>, and the global gitignore — all obeyed natively, down the tree, with correct negation semantics. No manual exclusion lists.</p>
+        </div>
+        <div class="feature">
+          <h3>Knows your blast radius</h3>
+          <p><code>hyperglobDependents()</code> returns every file that imports a given file, directly or transitively — with TS ESM extension mapping, <code>index.*</code> resolution, and bare monorepo specifiers.</p>
+        </div>
+        <div class="feature">
+          <h3>Remembers the tree</h3>
+          <p>An optional warm index snapshots the tree and validates it by mtime. Repeat queries answer from memory: 39 ms vs 83 ms at 110k files. The index rebuilds itself the moment anything changes.</p>
+        </div>
+        <div class="feature">
+          <h3>Safe by default</h3>
+          <p>Patterns cannot escape the working directory. Symlink cycles terminate. A corrupt native binary is detected and replaced instead of throwing a cryptic loader error. MCP registration is opt-in.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── CTA ───────────────────────────── -->
+  <section class="section cta">
+    <div class="wrap cta-inner">
+      <h2>Point it at your repo.</h2>
+      <p>One install, one command, and every agent you have stops guessing.</p>
+      <div class="install install-center">
+        <div class="install-row">
+          <span class="install-label">npm</span>
+          <code class="install-cmd" data-copyable>npm install @blazeinstall/hyperglob</code>
+          <button class="copy-btn" type="button" data-copy aria-label="Copy install command"></button>
+        </div>
+      </div>
+      <p class="cta-links">
+        <a href="getting-started.html">Read the guide</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">Browse the source</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

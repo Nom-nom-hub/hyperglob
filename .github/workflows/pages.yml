@@ -1,0 +1,58 @@
+name: Deploy docs site
+
+# Publishes the documentation site to GitHub Pages.
+#
+# The Markdown in docs/*.md is the source of truth; tools/build-site.mjs
+# renders it to HTML using the same chrome as the landing page. The rendered
+# HTML is committed to the repository, so Pages can serve it directly and
+# the site stays in sync with the docs without a build step on the server.
+#
+# The workflow verifies that the committed HTML matches the Markdown (so it
+# can never drift) and then asks GitHub to publish it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'tools/build-site.mjs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once; let the newest commit win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: verify the site is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: the committed HTML must match the Markdown
+        run: node tools/build-site.mjs --check
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

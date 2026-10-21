@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MCP server · hyperglob</title>
+<meta name="description" content="The hyperglob MCP server: three tools, their full parameter schemas, response shapes, timeouts, and how to register it with an agent." />
+<meta property="og:title" content="MCP server · hyperglob" />
+<meta property="og:description" content="The hyperglob MCP server: three tools, their full parameter schemas, response shapes, timeouts, and how to register it with an agent." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/mcp.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/mcp.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html" class="active" aria-current="page">MCP</a><a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>The hyperglob MCP server: three tools, their full parameter schemas, response shapes, timeouts, and how to register it with an agent.</p></blockquote>
+<h1 id="mcp-server">MCP server<a class="anchor" href="#mcp-server" aria-label="Permalink to this section">#</a></h1>
+<p><code>mcp.js</code> exposes hyperglob as an MCP tool server over stdio, speaking JSON-RPC
+2.0 with newline-delimited messages. Any MCP-speaking agent can run discovery
+queries — with the full selector language, the native ignore stack and the
+import graph — without writing a line of Node.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">node node_modules/@blazeinstall/hyperglob/mcp.js
+# or, once installed:
+npx hyperglob-mcp</code></pre></div>
+<h2 id="registering-with-an-agent">Registering with an agent<a class="anchor" href="#registering-with-an-agent" aria-label="Permalink to this section">#</a></h2>
+<h3 id="generic-mcp-client">Generic MCP client<a class="anchor" href="#generic-mcp-client" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;hyperglob&quot;: { &quot;command&quot;: &quot;node&quot;, &quot;args&quot;: [&quot;/path/to/hyperglob/mcp.js&quot;] }
+  }
+}</code></pre></div>
+<h3 id="claude-code">Claude Code<a class="anchor" href="#claude-code" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">claude mcp add hyperglob -- node /path/to/hyperglob/mcp.js</code></pre></div>
+<h3 id="cursor-cursormcpjson-cline-windsurf-gemini-cli-codex-zed-continue-opencode">Cursor (<code>.cursor/mcp.json</code>), Cline, Windsurf, Gemini CLI, Codex, Zed, Continue, OpenCode<a class="anchor" href="#cursor-cursormcpjson-cline-windsurf-gemini-cli-codex-zed-continue-opencode" aria-label="Permalink to this section">#</a></h3>
+<p>All of them take the same <code>command</code> / <code>args</code> shape. The one that differs is
+VS Code, whose project config uses a <code>servers</code> key:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;servers&quot;: {
+    &quot;hyperglob&quot;: { &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;node&quot;, &quot;args&quot;: [&quot;/path/to/hyperglob/mcp.js&quot;] }
+  }
+}</code></pre></div>
+<h3 id="auto-registration-is-opt-in">Auto-registration is opt-in<a class="anchor" href="#auto-registration-is-opt-in" aria-label="Permalink to this section">#</a></h3>
+<p>The <code>postinstall</code> script can add a <code>hyperglob</code> entry to the MCP configs of
+common agents — Claude Code, Cursor, Gemini CLI, Codex, Zed, Cline, Roo Code,
+Continue, Windsurf, Kilo Code, OpenCode, Kiro, Amp, Factory Droid, Crush.</p>
+<p><strong>It is disabled by default</strong>, because installing a library must not silently
+rewrite your global agent configuration. Enable it explicitly:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">HYPERGLOB_REGISTER_MCP=1 npm install</code></pre></div>
+<p>Registration is idempotent: an existing <code>hyperglob</code> entry is never
+duplicated. It also fails closed — a config file that cannot be parsed is left
+completely untouched rather than overwritten, and unrelated top-level keys are
+preserved. Project-scoped writes land in the directory you ran <code>npm install</code>
+from, not in the package directory.</p>
+<hr />
+<h2 id="tools">Tools<a class="anchor" href="#tools" aria-label="Permalink to this section">#</a></h2>
+<p>Three tools, all sharing the same core:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Tool</th><th style="text-align:left">Returns</th><th style="text-align:left">Use when</th></tr></thead><tbody><tr><td style="text-align:left"><code>hyperglob_query</code></td><td style="text-align:left">JSON with full entries</td><td style="text-align:left">You need metadata (size, mtime) or file content.</td></tr><tr><td style="text-align:left"><code>hyperglob_paths</code></td><td style="text-align:left">Newline-separated relative paths</td><td style="text-align:left">You only need the paths. Much cheaper for the model's context.</td></tr><tr><td style="text-align:left"><code>hyperglob_dependents</code></td><td style="text-align:left">Newline-separated relative paths</td><td style="text-align:left">You need the blast radius of a file.</td></tr></tbody></table></div>
+<h3 id="hyperglob_query"><code>hyperglob_query</code><a class="anchor" href="#hyperglob_query" aria-label="Permalink to this section">#</a></h3>
+<p>Full entries, paged, as JSON.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Name</th><th style="text-align:left">Type</th><th style="text-align:left">Required</th><th style="text-align:left">Description</th></tr></thead><tbody><tr><td style="text-align:left"><code>pattern</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">yes</td><td style="text-align:left">Glob pattern, optionally followed by selectors.</td></tr><tr><td style="text-align:left"><code>cwd</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">no</td><td style="text-align:left">Root directory to search from. Default: the server's cwd.</td></tr><tr><td style="text-align:left"><code>maxDepth</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Maximum traversal depth. Minimum <code>0</code>.</td></tr><tr><td style="text-align:left"><code>threads</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Walker threads. <code>0</code> = auto. Minimum <code>0</code>.</td></tr><tr><td style="text-align:left"><code>dot</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Include dotfiles / dot-directories. Default <code>false</code>.</td></tr><tr><td style="text-align:left"><code>gitignore</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Obey <code>.gitignore</code> / <code>.git/info/exclude</code> / global gitignore. Default <code>true</code>.</td></tr><tr><td style="text-align:left"><code>ignoreFiles</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Obey <code>.ignore</code> and <code>.agentignore</code>. Default <code>true</code>.</td></tr><tr><td style="text-align:left"><code>ignore</code></td><td style="text-align:left"><code>string[]</code></td><td style="text-align:left">no</td><td style="text-align:left">Extra glob patterns to exclude, e.g. <code>[&quot;**/dist/**&quot;, &quot;**/*.min.js&quot;]</code>.</td></tr><tr><td style="text-align:left"><code>onlyFiles</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Only return files. Default <code>true</code>; <code>false</code> includes directories.</td></tr><tr><td style="text-align:left"><code>followSymlinks</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Follow symlinked directories. Default <code>false</code>.</td></tr><tr><td style="text-align:left"><code>stats</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Populate size / modified. Default <code>true</code>.</td></tr><tr><td style="text-align:left"><code>content</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Include file contents in entries. Default <code>false</code>.</td></tr><tr><td style="text-align:left"><code>index</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Use the warm index snapshot at <code>&lt;cwd&gt;/.hyperglob/</code>. Default <code>false</code>.</td></tr><tr><td style="text-align:left"><code>limit</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Maximum entries to return. <code>1</code> – <code>10000</code>, default <code>500</code>.</td></tr><tr><td style="text-align:left"><code>offset</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Skip this many matches before collecting. Minimum <code>0</code>.</td></tr><tr><td style="text-align:left"><code>timeoutMs</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Wall-clock budget for this call. <code>1000</code> – <code>600000</code>, default <code>60000</code>.</td></tr></tbody></table></div>
+<p><strong>Response</strong></p>
+<p>The tool result is a single text blob containing JSON:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;count&quot;: 3,
+  &quot;total&quot;: 3,
+  &quot;offset&quot;: 0,
+  &quot;limit&quot;: 500,
+  &quot;truncated&quot;: false,
+  &quot;entries&quot;: [
+    {
+      &quot;path&quot;: &quot;/repo/src/app.ts&quot;,
+      &quot;relativePath&quot;: &quot;src/app.ts&quot;,
+      &quot;name&quot;: &quot;app.ts&quot;,
+      &quot;extension&quot;: &quot;ts&quot;,
+      &quot;size&quot;: 1240,
+      &quot;isFile&quot;: true,
+      &quot;isDir&quot;: false,
+      &quot;modified&quot;: &quot;2026-10-14T09:31:00.000Z&quot;,
+      &quot;modifiedMs&quot;: 1791361860000
+    }
+  ]
+}</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Field</th><th style="text-align:left">Type</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>count</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">Entries in this page.</td></tr><tr><td style="text-align:left"><code>total</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">Total matches found.</td></tr><tr><td style="text-align:left"><code>offset</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">The offset this page started at.</td></tr><tr><td style="text-align:left"><code>limit</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">The limit that was applied.</td></tr><tr><td style="text-align:left"><code>truncated</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left"><code>true</code> when more matched than were returned.</td></tr><tr><td style="text-align:left"><code>entries</code></td><td style="text-align:left"><code>object[]</code></td><td style="text-align:left">The page.</td></tr></tbody></table></div>
+<p>Each entry carries <code>path</code>, <code>relativePath</code>, <code>name</code>, <code>extension</code>, <code>size</code>,
+<code>isFile</code>, <code>isDir</code>, <code>modified</code> (ISO string) and <code>modifiedMs</code>. <code>size</code> and
+<code>modifiedMs</code> are <code>null</code> when <code>stats: false</code>; <code>modified</code> is <code>null</code> when there
+is no date. <code>content</code> is present (a string, or <code>null</code>) only when
+<code>content: true</code>.</p>
+<p><strong>Paging.</strong> A tool result lands in the model's context, so the result is
+capped. When <code>truncated</code> is <code>true</code>, raise <code>limit</code> or page with <code>offset</code>:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{ &quot;pattern&quot;: &quot;src/**/*.ts&quot;, &quot;limit&quot;: 100, &quot;offset&quot;: 0 }
+{ &quot;pattern&quot;: &quot;src/**/*.ts&quot;, &quot;limit&quot;: 100, &quot;offset&quot;: 100 }</code></pre></div>
+<h3 id="hyperglob_paths"><code>hyperglob_paths</code><a class="anchor" href="#hyperglob_paths" aria-label="Permalink to this section">#</a></h3>
+<p>The fast path. Same pattern and selector syntax, same options, but the result
+is just relative paths, one per line, so it costs a fraction of the tokens.</p>
+<p><strong>Parameters</strong></p>
+<p>Identical to <code>hyperglob_query</code>, including <code>pattern</code> (required), <code>cwd</code>,
+<code>maxDepth</code>, <code>threads</code>, <code>dot</code>, <code>gitignore</code>, <code>ignoreFiles</code>, <code>ignore</code>,
+<code>onlyFiles</code>, <code>followSymlinks</code>, <code>stats</code>, <code>content</code>, <code>index</code>, <code>limit</code>, <code>offset</code>
+and <code>timeoutMs</code>.</p>
+<p><strong>Response</strong></p>
+<p>A newline-separated list of relative paths:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/app.ts
+src/hooks/useServer.ts
+src/hooks/useServer.test.ts</code></pre></div>
+<p>Empty output (an empty string) when nothing matched.</p>
+<h3 id="hyperglob_dependents"><code>hyperglob_dependents</code><a class="anchor" href="#hyperglob_dependents" aria-label="Permalink to this section">#</a></h3>
+<p>The import graph. Lists every JS/TS file that imports the target, directly or
+transitively.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Name</th><th style="text-align:left">Type</th><th style="text-align:left">Required</th><th style="text-align:left">Description</th></tr></thead><tbody><tr><td style="text-align:left"><code>target</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">yes</td><td style="text-align:left">Cwd-relative path of the file, e.g. <code>src/hooks.ts</code>.</td></tr><tr><td style="text-align:left"><code>cwd</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">no</td><td style="text-align:left">Root directory. Default: the server's cwd.</td></tr><tr><td style="text-align:left"><code>maxDepth</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Maximum traversal depth. Minimum <code>0</code>.</td></tr><tr><td style="text-align:left"><code>dot</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Include dotfiles / dot-directories. Default <code>false</code>.</td></tr><tr><td style="text-align:left"><code>gitignore</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Obey <code>.gitignore</code>. Default <code>true</code>.</td></tr><tr><td style="text-align:left"><code>ignoreFiles</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left">no</td><td style="text-align:left">Obey <code>.ignore</code> and <code>.agentignore</code>. Default <code>true</code>.</td></tr><tr><td style="text-align:left"><code>ignore</code></td><td style="text-align:left"><code>string[]</code></td><td style="text-align:left">no</td><td style="text-align:left">Extra glob patterns to exclude.</td></tr><tr><td style="text-align:left"><code>limit</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Maximum dependents to return. <code>1</code> – <code>10000</code>, default <code>500</code>.</td></tr><tr><td style="text-align:left"><code>timeoutMs</code></td><td style="text-align:left"><code>number</code></td><td style="text-align:left">no</td><td style="text-align:left">Wall-clock budget for this call. <code>1000</code> – <code>600000</code>, default <code>60000</code>.</td></tr></tbody></table></div>
+<p><strong>Response</strong></p>
+<p>Newline-separated relative paths, sorted:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/app.ts
+src/routes/dashboard.ts</code></pre></div>
+<p>An empty string when nothing imports the target. A target that does not exist
+under <code>cwd</code> is an error.</p>
+<hr />
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Permalink to this section">#</a></h2>
+<p>Tool failures come back as a normal MCP tool result with <code>isError: true</code> and a
+text message — not as a JSON-RPC error — so the agent can read what went wrong
+and retry:</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;content&quot;: [{ &quot;type&quot;: &quot;text&quot;, &quot;text&quot;: &quot;hyperglob error: unknown selector :bogus&quot; }],
+  &quot;isError&quot;: true
+}</code></pre></div>
+<p>Bad <em>arguments</em> are rejected earlier, as JSON-RPC <code>invalid params</code>
+(<code>-32602</code>):</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Condition</th><th style="text-align:left">Message</th></tr></thead><tbody><tr><td style="text-align:left">Missing <code>pattern</code></td><td style="text-align:left"><code>pattern (string) is required</code></td></tr><tr><td style="text-align:left">Missing <code>target</code></td><td style="text-align:left"><code>target (string) is required</code></td></tr><tr><td style="text-align:left">Unknown tool name</td><td style="text-align:left"><code>unknown tool: hyperglob_nope</code></td></tr><tr><td style="text-align:left"><code>maxDepth</code> negative</td><td style="text-align:left"><code>maxDepth must be a non-negative integer, got -1</code></td></tr><tr><td style="text-align:left"><code>threads</code> negative</td><td style="text-align:left"><code>threads must be a non-negative integer, got -1</code></td></tr><tr><td style="text-align:left"><code>limit</code> below 1</td><td style="text-align:left"><code>limit must be a positive integer, got 0</code></td></tr><tr><td style="text-align:left"><code>offset</code> negative</td><td style="text-align:left"><code>offset must be a non-negative integer, got -1</code></td></tr><tr><td style="text-align:left"><code>timeoutMs</code> below 1000</td><td style="text-align:left"><code>timeoutMs must be an integer &gt;= 1000, got 100</code></td></tr><tr><td style="text-align:left"><code>ignore</code> not strings</td><td style="text-align:left"><code>ignore must be a glob pattern string or an array of strings, got ...</code></td></tr><tr><td style="text-align:left">A boolean option that is not a boolean</td><td style="text-align:left"><code>dot must be a boolean, got &quot;yes&quot;</code></td></tr></tbody></table></div>
+<hr />
+<h2 id="timeouts">Timeouts<a class="anchor" href="#timeouts" aria-label="Permalink to this section">#</a></h2>
+<p>Every tool call runs under a <strong>wall-clock budget, default 60 s</strong>. The budget
+is set per call with the <code>timeoutMs</code> argument, or for the whole server with
+<code>--timeout-ms &lt;ms&gt;</code> or <code>HYPERGLOB_MCP_TIMEOUT_MS=&lt;ms&gt;</code>; a per-call value
+always wins.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash"># Server-wide, 5 minutes
+HYPERGLOB_MCP_TIMEOUT_MS=300000 node mcp.js
+node mcp.js --timeout-ms 300000</code></pre></div>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{ &quot;pattern&quot;: &quot;**/*.ts&quot;, &quot;timeoutMs&quot;: 300000 }</code></pre></div>
+<p>The value is clamped to <code>1000</code> – <code>600000</code> ms. A call that exceeds the budget
+returns <code>isError: true</code> with <code>query timed out after &lt;n&gt;ms</code> instead of hanging
+the server.</p>
+<hr />
+<h2 id="isolation-and-stdout-hygiene">Isolation and stdout hygiene<a class="anchor" href="#isolation-and-stdout-hygiene" aria-label="Permalink to this section">#</a></h2>
+<p>Tool calls run inside a <strong>worker thread</strong>. That gives the server three
+properties that matter in production:</p>
+<ul><li><strong>A hard timeout.</strong> A native call that never returns can no longer wedge the</li></ul>
+<p>  protocol loop; the worker is terminated and replaced.</p>
+<ul><li><strong>Crash isolation.</strong> A native segfault kills the worker, not the server.</li><li><strong>Responsiveness.</strong> The event loop stays free while a scan runs, so</li></ul>
+<p>  notifications are still processed and concurrent calls run in parallel.</p>
+<p>The JSON-RPC stream owns stdout. A guard redirects any foreign stdout write
+to stderr — at the JS level <em>and</em> at the file-descriptor level, so a child
+process spawned with <code>stdio: 'inherit'</code> cannot corrupt the protocol either.
+Worker stdout and stderr are piped to the server's stderr.</p>
+<h3 id="the-worker-pool">The worker pool<a class="anchor" href="#the-worker-pool" aria-label="Permalink to this section">#</a></h3>
+<p>The runner keeps a <strong>pool</strong> of workers, not a single one. The native scan is
+synchronous, so one worker can only run one query at a time; concurrent tool
+calls are dispatched to separate workers and run in parallel (the pool holds
+up to 4). A worker that finishes a job is terminated when nothing is queued,
+because an idle worker's <code>MessagePort</code> would otherwise keep the process alive.
+A worker that times out or crashes is replaced.</p>
+<p>Set <code>HYPERGLOB_MCP_WORKER=0</code> to run jobs in-process instead of in a worker
+thread — useful when debugging, at the cost of the timeout and crash
+isolation guarantees.</p>
+<hr />
+<h2 id="protocol-details">Protocol details<a class="anchor" href="#protocol-details" aria-label="Permalink to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Method</th><th style="text-align:left">Response</th></tr></thead><tbody><tr><td style="text-align:left"><code>initialize</code></td><td style="text-align:left"><code>protocolVersion</code>, <code>capabilities: { tools: {} }</code>, <code>serverInfo: { name: 'hyperglob', version }</code>.</td></tr><tr><td style="text-align:left"><code>ping</code></td><td style="text-align:left"><code>{}</code>.</td></tr><tr><td style="text-align:left"><code>tools/list</code></td><td style="text-align:left">The three tools with their full <code>inputSchema</code>.</td></tr><tr><td style="text-align:left"><code>tools/call</code></td><td style="text-align:left">The tool result.</td></tr><tr><td style="text-align:left"><code>notifications/*</code></td><td style="text-align:left">Never answered.</td></tr></tbody></table></div>
+<p>Supported protocol versions: <code>2024-11-05</code>, <code>2025-03-26</code>, <code>2025-06-18</code>. The
+server echoes back a version it knows; anything else gets the default
+<code>2024-11-05</code>.</p>
+<p>A malformed JSON line is answered with a parse error (<code>-32700</code>). An unknown
+method with an id gets method-not-found (<code>-32601</code>).</p>
+<hr />
+<h2 id="using-the-module-directly">Using the module directly<a class="anchor" href="#using-the-module-directly" aria-label="Permalink to this section">#</a></h2>
+<p><code>mcp.js</code> exports everything the stdio loop uses, so the server can be driven
+in-process. The package's <code>exports</code> map exposes it as a subpath:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const { handle, TOOLS, ToolRunner } = require('@blazeinstall/hyperglob/mcp.js');
+
+const runner = new ToolRunner({ timeoutMs: 20000 });
+
+const res = await handle(
+  {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: {
+      name: 'hyperglob_paths',
+      arguments: { pattern: 'src/**/*.ts', cwd: process.cwd() },
+    },
+  },
+  { runner }
+);
+
+console.log(res.result.content[0].text);
+runner.close();</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Export</th><th style="text-align:left">Purpose</th></tr></thead><tbody><tr><td style="text-align:left"><code>handle(msg, deps?)</code></td><td style="text-align:left">Handle one JSON-RPC message. Returns the response, or <code>null</code> for a notification.</td></tr><tr><td style="text-align:left"><code>serve(opts?)</code></td><td style="text-align:left">Run the newline-delimited stdio loop.</td></tr><tr><td style="text-align:left"><code>TOOLS</code></td><td style="text-align:left">The three tool definitions.</td></tr><tr><td style="text-align:left"><code>ToolRunner</code></td><td style="text-align:left">The worker-pool job runner.</td></tr><tr><td style="text-align:left"><code>runJob(job)</code></td><td style="text-align:left">Execute one job in-process.</td></tr><tr><td style="text-align:left"><code>buildOptions(args, pathsOnly)</code></td><td style="text-align:left">Translate MCP arguments into hyperglob options.</td></tr><tr><td style="text-align:left"><code>validateArgs(args)</code></td><td style="text-align:left">Validate arguments; throws a <code>UsageError</code> on bad input.</td></tr><tr><td style="text-align:left"><code>formatToolText(op, payload)</code></td><td style="text-align:left">Render a payload as the tool's text.</td></tr><tr><td style="text-align:left"><code>setProtocolSink(sink)</code></td><td style="text-align:left">Redirect the protocol stream (used by tests).</td></tr></tbody></table></div>
+<p>Requiring <code>mcp.js</code> has no side effects — the stdio loop only starts when the
+file is the process entry point.</p>
+<hr />
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="selectors.md">Selectors</a> — the query language the <code>pattern</code> argument uses.</li><li><a href="api.md">API</a> — the same options from Node.</li><li><a href="cli.md">CLI</a> — the same engine from a shell.</li></ul>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/mcp.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#registering-with-an-agent">Registering with an agent</a></li><li class="toc-l3"><a href="#generic-mcp-client">Generic MCP client</a></li><li class="toc-l3"><a href="#claude-code">Claude Code</a></li><li class="toc-l3"><a href="#cursor-cursormcpjson-cline-windsurf-gemini-cli-codex-zed-continue-opencode">Cursor (.cursor/mcp.json), Cline, Windsurf, Gemini CLI, Codex, Zed, Continue, OpenCode</a></li><li class="toc-l3"><a href="#auto-registration-is-opt-in">Auto-registration is opt-in</a></li><li class="toc-l2"><a href="#tools">Tools</a></li><li class="toc-l3"><a href="#hyperglob_query">hyperglob_query</a></li><li class="toc-l3"><a href="#hyperglob_paths">hyperglob_paths</a></li><li class="toc-l3"><a href="#hyperglob_dependents">hyperglob_dependents</a></li><li class="toc-l2"><a href="#errors">Errors</a></li><li class="toc-l2"><a href="#timeouts">Timeouts</a></li><li class="toc-l2"><a href="#isolation-and-stdout-hygiene">Isolation and stdout hygiene</a></li><li class="toc-l3"><a href="#the-worker-pool">The worker pool</a></li><li class="toc-l2"><a href="#protocol-details">Protocol details</a></li><li class="toc-l2"><a href="#using-the-module-directly">Using the module directly</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

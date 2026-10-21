@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CLI · hyperglob</title>
+<meta name="description" content="The hyperglob CLI: every flag, every exit code, and worked examples for shell pipelines and agents." />
+<meta property="og:title" content="CLI · hyperglob" />
+<meta property="og:description" content="The hyperglob CLI: every flag, every exit code, and worked examples for shell pipelines and agents." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/cli.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/cli.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html" class="active" aria-current="page">CLI</a><a href="mcp.html">MCP</a><a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>The hyperglob CLI: every flag, every exit code, and worked examples for shell pipelines and agents.</p></blockquote>
+<h1 id="cli">CLI<a class="anchor" href="#cli" aria-label="Permalink to this section">#</a></h1>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">usage: hyperglob &lt;pattern...&gt; [options]
+       hyperglob --dependents &lt;path&gt; [options]</code></pre></div>
+<p>The CLI is built for agents and shell pipelines: relative paths by default,
+one per line, and a stable exit-code contract.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">npx hyperglob 'src/**/*.ts :exports(&quot;useServerHook&quot;)'
+npx hyperglob 'src/**/*.ts' --json --paths-only
+npx hyperglob --dependents src/hooks.ts</code></pre></div>
+<hr />
+<h2 id="options">Options<a class="anchor" href="#options" aria-label="Permalink to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Flag</th><th style="text-align:left">Argument</th><th style="text-align:left">Default</th><th style="text-align:left">Effect</th></tr></thead><tbody><tr><td style="text-align:left"><code>--cwd &lt;dir&gt;</code></td><td style="text-align:left">directory</td><td style="text-align:left"><code>process.cwd()</code></td><td style="text-align:left">Root directory to search from.</td></tr><tr><td style="text-align:left"><code>--json</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Emit JSON instead of plain paths.</td></tr><tr><td style="text-align:left"><code>--content</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Include file contents in the output.</td></tr><tr><td style="text-align:left"><code>--paths-only</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Print relative paths only, one per line.</td></tr><tr><td style="text-align:left"><code>--absolute</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Print absolute paths instead of relative ones.</td></tr><tr><td style="text-align:left"><code>--ignore &lt;glob&gt;</code></td><td style="text-align:left">glob</td><td style="text-align:left">—</td><td style="text-align:left">Exclude paths matching the glob. Repeatable.</td></tr><tr><td style="text-align:left"><code>--include-dirs</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Include directories in the results (default: files only).</td></tr><tr><td style="text-align:left"><code>--only-files</code></td><td style="text-align:left">—</td><td style="text-align:left">on</td><td style="text-align:left">Only files in the results. Opposite of <code>--include-dirs</code>; wins over it.</td></tr><tr><td style="text-align:left"><code>--dot</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Include dotfiles and dot-directories.</td></tr><tr><td style="text-align:left"><code>--no-gitignore</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Do not obey <code>.gitignore</code> / <code>.git/info/exclude</code>.</td></tr><tr><td style="text-align:left"><code>--no-ignore-files</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Do not obey <code>.ignore</code> / <code>.agentignore</code>.</td></tr><tr><td style="text-align:left"><code>--follow-symlinks</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Follow symlinked directories.</td></tr><tr><td style="text-align:left"><code>--max-depth &lt;n&gt;</code></td><td style="text-align:left">integer</td><td style="text-align:left">unlimited</td><td style="text-align:left">Maximum traversal depth. Must be a non-negative integer.</td></tr><tr><td style="text-align:left"><code>--threads &lt;n&gt;</code></td><td style="text-align:left">integer</td><td style="text-align:left"><code>0</code> (auto)</td><td style="text-align:left">Walker threads. Must be a non-negative integer.</td></tr><tr><td style="text-align:left"><code>--index</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Use the warm index snapshot at <code>&lt;cwd&gt;/.hyperglob/</code>.</td></tr><tr><td style="text-align:left"><code>--no-stats</code></td><td style="text-align:left">—</td><td style="text-align:left">off</td><td style="text-align:left">Omit size / modified metadata.</td></tr><tr><td style="text-align:left"><code>--dependents &lt;path&gt;</code></td><td style="text-align:left">path</td><td style="text-align:left">—</td><td style="text-align:left">List every file that imports <code>&lt;path&gt;</code>, directly or transitively.</td></tr><tr><td style="text-align:left"><code>-h</code>, <code>--help</code></td><td style="text-align:left">—</td><td style="text-align:left">—</td><td style="text-align:left">Print usage and exit <code>0</code>.</td></tr><tr><td style="text-align:left"><code>-v</code>, <code>--version</code></td><td style="text-align:left">—</td><td style="text-align:left">—</td><td style="text-align:left">Print the version and exit <code>0</code>.</td></tr></tbody></table></div>
+<h3 id="flag-syntax">Flag syntax<a class="anchor" href="#flag-syntax" aria-label="Permalink to this section">#</a></h3>
+<p>Flags take their value as the <strong>next argument</strong>, separated by a space:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts' --cwd packages/app --max-depth 4</code></pre></div>
+<p><code>--flag=value</code> is not supported and is reported as an unknown flag.</p>
+<p>Anything that is not a flag is a pattern, so multiple patterns are allowed:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts' 'packages/**/*.ts'</code></pre></div>
+<hr />
+<h2 id="output-modes">Output modes<a class="anchor" href="#output-modes" aria-label="Permalink to this section">#</a></h2>
+<h3 id="default-relative-paths-one-per-line">Default: relative paths, one per line<a class="anchor" href="#default-relative-paths-one-per-line" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd examples/fixture
+src/hook.test.ts
+src/hook.ts
+src/other.ts</code></pre></div>
+<h3 id="-absolute"><code>--absolute</code><a class="anchor" href="#-absolute" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd examples/fixture --absolute
+/repo/examples/fixture/src/hook.test.ts
+/repo/examples/fixture/src/hook.ts
+/repo/examples/fixture/src/other.ts</code></pre></div>
+<h3 id="-paths-only"><code>--paths-only</code><a class="anchor" href="#-paths-only" aria-label="Permalink to this section">#</a></h3>
+<p>A presentation mode: the default output already is relative paths one per
+line, so <code>--paths-only</code> changes nothing about the text. It is kept as a
+distinct flag so scripts can be explicit, and so <code>--json --paths-only</code> emits a
+bare string array instead of objects.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd examples/fixture --paths-only
+src/hook.test.ts
+src/hook.ts
+src/other.ts</code></pre></div>
+<h3 id="-json"><code>--json</code><a class="anchor" href="#-json" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd examples/fixture --json
+[
+  {
+    &quot;path&quot;: &quot;/repo/examples/fixture/src/hook.test.ts&quot;,
+    &quot;relativePath&quot;: &quot;src/hook.test.ts&quot;,
+    &quot;name&quot;: &quot;hook.test.ts&quot;,
+    &quot;extension&quot;: &quot;ts&quot;,
+    &quot;size&quot;: 44,
+    &quot;isFile&quot;: true,
+    &quot;isDir&quot;: false,
+    &quot;modified&quot;: &quot;2026-10-16T18:55:41.291Z&quot;,
+    &quot;modifiedMs&quot;: 1792176941291
+  }
+]</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Field</th><th style="text-align:left">Type</th><th style="text-align:left">Notes</th></tr></thead><tbody><tr><td style="text-align:left"><code>path</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">Absolute path.</td></tr><tr><td style="text-align:left"><code>relativePath</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">Relative to <code>cwd</code>, posix separators.</td></tr><tr><td style="text-align:left"><code>name</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">File name.</td></tr><tr><td style="text-align:left"><code>extension</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">Extension without the dot.</td></tr><tr><td style="text-align:left"><code>size</code></td><td style="text-align:left">`number \</td><td style="text-align:left">null`</td></tr><tr><td style="text-align:left"><code>isFile</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left"></td></tr><tr><td style="text-align:left"><code>isDir</code></td><td style="text-align:left"><code>boolean</code></td><td style="text-align:left"></td></tr><tr><td style="text-align:left"><code>modified</code></td><td style="text-align:left">`string \</td><td style="text-align:left">null`</td></tr><tr><td style="text-align:left"><code>modifiedMs</code></td><td style="text-align:left">`number \</td><td style="text-align:left">null`</td></tr><tr><td style="text-align:left"><code>content</code></td><td style="text-align:left"><code>string</code></td><td style="text-align:left">Only with <code>--content</code>.</td></tr></tbody></table></div>
+<p><code>--json --paths-only</code> emits a plain array of strings:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd examples/fixture --json --paths-only
+[
+  &quot;src/hook.test.ts&quot;,
+  &quot;src/hook.ts&quot;,
+  &quot;src/other.ts&quot;
+]</code></pre></div>
+<h3 id="-content"><code>--content</code><a class="anchor" href="#-content" aria-label="Permalink to this section">#</a></h3>
+<p>Adds the file contents to <code>--json</code> output:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/hook.ts' --cwd examples/fixture --json --content</code></pre></div>
+<hr />
+<h2 id="directories">Directories<a class="anchor" href="#directories" aria-label="Permalink to this section">#</a></h2>
+<p>By default only files are reported. <code>--include-dirs</code> adds directories; an
+explicit <code>--only-files</code> overrides it.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**' --cwd examples/fixture --include-dirs
+src/data.json
+src/hook.test.ts
+src/hook.ts
+src/other.ts
+
+$ hyperglob 'src/**' --cwd examples/fixture --include-dirs --only-files
+src/data.json
+src/hook.test.ts
+src/hook.ts
+src/other.ts</code></pre></div>
+<p>A directory shows up when the pattern names its <em>contents</em> — <code>src/**</code> matches
+the children of <code>src</code>, so <code>src/deep</code> would appear here if it existed, but <code>src</code>
+itself never does.</p>
+<hr />
+<h2 id="the-ignore-stack">The ignore stack<a class="anchor" href="#the-ignore-stack" aria-label="Permalink to this section">#</a></h2>
+<p><code>.gitignore</code>, <code>.ignore</code>, <code>.agentignore</code>, <code>.git/info/exclude</code> and the global
+gitignore are obeyed natively.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash"># What git would ignore:
+hyperglob '**/*.ts'
+
+# What is actually on disk:
+hyperglob '**/*.ts' --no-gitignore
+
+# Without the .ignore / .agentignore layer:
+hyperglob '**/*.ts' --no-ignore-files</code></pre></div>
+<p><code>--ignore</code> adds your own exclusions on top:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob '**/*.ts' --ignore '**/generated/**' --ignore '**/*.d.ts'</code></pre></div>
+<hr />
+<h2 id="depth-and-threads">Depth and threads<a class="anchor" href="#depth-and-threads" aria-label="Permalink to this section">#</a></h2>
+<p><code>--max-depth</code> is counted from the pattern's static base, matching fast-glob's
+<code>deep</code> semantics:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash"># src/index.ts is 1 below src/, src/deep/nested.ts is 2.
+hyperglob 'src/**/*.ts' --max-depth 1   # finds src/index.ts
+hyperglob 'src/**/*.ts' --max-depth 2   # also finds src/deep/nested.ts</code></pre></div>
+<p><code>--max-depth 0</code> is valid and means &quot;the walk root only&quot; — it does not
+silently widen to unlimited.</p>
+<p><code>--threads</code> sets the walker thread count. <code>0</code> (the default) lets the rayon
+pool decide; use it only when you are tuning for a specific machine:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob '**/*.ts' --threads 8</code></pre></div>
+<p>Both flags validate their value. A non-integer, a fraction or a negative
+number is a <strong>usage error</strong> (exit <code>2</code>), not a silently-truncated value:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --max-depth abc
+hyperglob: --max-depth expects a non-negative integer, got &quot;abc&quot;
+# ...usage text...</code></pre></div>
+<hr />
+<h2 id="the-warm-index">The warm index<a class="anchor" href="#the-warm-index" aria-label="Permalink to this section">#</a></h2>
+<p><code>--index</code> maintains a snapshot at <code>&lt;cwd&gt;/.hyperglob/index.json</code> and answers
+repeat queries from it.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts' --index      # first call: builds the snapshot
+hyperglob 'src/**/*.ts' --index      # subsequent calls: validated, in-memory</code></pre></div>
+<p>The <code>.hyperglob/</code> directory never appears in results, so a scan with <code>--index</code>
+and a scan without it always return the same set.</p>
+<hr />
+<h2 id="import-graph-dependents">Import graph: <code>--dependents</code><a class="anchor" href="#import-graph-dependents" aria-label="Permalink to this section">#</a></h2>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob --dependents src/hooks.ts --cwd /repo
+src/app.ts
+src/routes/dashboard.ts</code></pre></div>
+<p>Lists every JS/TS file that imports the target, <strong>directly or transitively</strong>.
+The target must be a cwd-relative path that exists under <code>cwd</code>; otherwise the
+command exits <code>1</code> with <code>target not found under cwd: &lt;path&gt;</code>.</p>
+<p><code>--dependents</code> takes precedence over patterns: if you pass both, the
+dependency query wins.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash"># JSON output works here too.
+hyperglob --dependents src/hooks.ts --cwd /repo --json</code></pre></div>
+<hr />
+<h2 id="exit-codes">Exit codes<a class="anchor" href="#exit-codes" aria-label="Permalink to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Code</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>0</code></td><td style="text-align:left">Success.</td></tr><tr><td style="text-align:left"><code>1</code></td><td style="text-align:left">Runtime error: bad pattern, missing target, native failure.</td></tr><tr><td style="text-align:left"><code>2</code></td><td style="text-align:left">Usage error: unknown flag, missing argument, invalid number, no pattern given.</td></tr></tbody></table></div>
+<p>The distinction is deliberate: a <code>2</code> means <em>your command line is wrong</em> and
+should not be retried, a <code>1</code> means <em>the query itself failed</em>.</p>
+<h3 id="examples">Examples<a class="anchor" href="#examples" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">$ hyperglob 'src/**/*.ts' --cwd /repo
+$ echo $?
+0
+
+$ hyperglob 'src/[[[' --cwd /repo
+hyperglob: invalid glob pattern &quot;src/[[[&quot;: error parsing glob 'src/[[[': unclosed character class; missing ']'
+$ echo $?
+1
+
+$ hyperglob --definitely-not-a-flag
+hyperglob: unknown flag --definitely-not-a-flag
+# ...usage text...
+$ echo $?
+2
+
+$ hyperglob
+hyperglob: no pattern given
+# ...usage text...
+$ echo $?
+2</code></pre></div>
+<p>Errors are printed to stderr as a single clean line — never a stack trace.
+Usage errors also print the usage text.</p>
+<hr />
+<h2 id="shell-recipes">Shell recipes<a class="anchor" href="#shell-recipes" aria-label="Permalink to this section">#</a></h2>
+<p>Count the files in a package:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts' --cwd packages/app | wc -l</code></pre></div>
+<p>Feed the paths to another tool:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts' --cwd packages/app | xargs rg -l 'useServer'</code></pre></div>
+<p>Find the biggest files:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*' --json | jq -r '.[] | &quot;\(.size)\t\(.relativePath)&quot;' | sort -rn | head -20</code></pre></div>
+<p>List every file that exports a symbol:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts :exports(&quot;useServerHook&quot;)' --cwd packages/app</code></pre></div>
+<p>Check for files that import a package:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">hyperglob 'src/**/*.ts :imports(&quot;react&quot;)' --cwd packages/app --paths-only</code></pre></div>
+<hr />
+<h2 id="driving-the-cli-from-a-script">Driving the CLI from a script<a class="anchor" href="#driving-the-cli-from-a-script" aria-label="Permalink to this section">#</a></h2>
+<p><code>cli.js</code> exports <code>main(argv, io)</code> with injectable output writers, so it can
+be driven in-process with no child process. The package's <code>exports</code> map
+exposes it as a subpath:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const cli = require('@blazeinstall/hyperglob/cli.js');
+
+const out = [];
+const err = [];
+const code = cli.main(['node', 'cli.js', 'src/**/*.ts', '--cwd', '/repo'], {
+  out: (text) =&gt; out.push(text),
+  err: (text) =&gt; err.push(text),
+});
+
+console.log(code);      // 0
+console.log(out.join('\n'));</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Export</th><th style="text-align:left">Purpose</th></tr></thead><tbody><tr><td style="text-align:left"><code>main(argv, io?)</code></td><td style="text-align:left">Run the CLI. Returns the exit code.</td></tr><tr><td style="text-align:left"><code>parseArgs(argv)</code></td><td style="text-align:left">Parse argv into <code>{ patterns, options, flags, dependentsOf }</code>. Throws <code>UsageError</code>.</td></tr><tr><td style="text-align:left"><code>parseNonNegativeInt(raw, flag)</code></td><td style="text-align:left">Validate a numeric flag value.</td></tr><tr><td style="text-align:left"><code>renderPlain(entries, flags)</code></td><td style="text-align:left">Render entries as plain lines.</td></tr><tr><td style="text-align:left"><code>renderJson(entries, flags)</code></td><td style="text-align:left">Render entries as JSON.</td></tr><tr><td style="text-align:left"><code>USAGE</code></td><td style="text-align:left">The usage text.</td></tr><tr><td style="text-align:left"><code>EXIT_OK</code> / <code>EXIT_ERROR</code> / <code>EXIT_USAGE</code></td><td style="text-align:left"><code>0</code> / <code>1</code> / <code>2</code>.</td></tr><tr><td style="text-align:left"><code>UsageError</code></td><td style="text-align:left">Error carrying <code>exitCode: 2</code>.</td></tr></tbody></table></div>
+<p>Requiring <code>cli.js</code> does not run a scan.</p>
+<hr />
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="selectors.md">Selectors</a> — the query language in the pattern argument.</li><li><a href="api.md">API</a> — the same options from Node.</li><li><a href="mcp.md">MCP</a> — the same engine as agent tools.</li></ul>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/cli.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#options">Options</a></li><li class="toc-l3"><a href="#flag-syntax">Flag syntax</a></li><li class="toc-l2"><a href="#output-modes">Output modes</a></li><li class="toc-l3"><a href="#default-relative-paths-one-per-line">Default: relative paths, one per line</a></li><li class="toc-l3"><a href="#-absolute">--absolute</a></li><li class="toc-l3"><a href="#-paths-only">--paths-only</a></li><li class="toc-l3"><a href="#-json">--json</a></li><li class="toc-l3"><a href="#-content">--content</a></li><li class="toc-l2"><a href="#directories">Directories</a></li><li class="toc-l2"><a href="#the-ignore-stack">The ignore stack</a></li><li class="toc-l2"><a href="#depth-and-threads">Depth and threads</a></li><li class="toc-l2"><a href="#the-warm-index">The warm index</a></li><li class="toc-l2"><a href="#import-graph-dependents">Import graph: --dependents</a></li><li class="toc-l2"><a href="#exit-codes">Exit codes</a></li><li class="toc-l3"><a href="#examples">Examples</a></li><li class="toc-l2"><a href="#shell-recipes">Shell recipes</a></li><li class="toc-l2"><a href="#driving-the-cli-from-a-script">Driving the CLI from a script</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

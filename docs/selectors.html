@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Selectors · hyperglob</title>
+<meta name="description" content="The hyperglob query language: glob patterns, negations, brace expansion, and every selector with its exact semantics and traps." />
+<meta property="og:title" content="Selectors · hyperglob" />
+<meta property="og:description" content="The hyperglob query language: glob patterns, negations, brace expansion, and every selector with its exact semantics and traps." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/selectors.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/selectors.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html" class="active" aria-current="page">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html">MCP</a><a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>The hyperglob query language: glob patterns, negations, brace expansion, and every selector with its exact semantics and traps.</p></blockquote>
+<h1 id="selectors">Selectors<a class="anchor" href="#selectors" aria-label="Permalink to this section">#</a></h1>
+<p>A query is a <strong>glob pattern</strong> followed by <strong>zero or more selectors</strong>, separated
+by whitespace:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/**/*.ts :contains(&quot;useServerHook&quot;) :size(&lt;100kb) :modified(&gt;2026-10-01)</code></pre></div>
+<p>Everything about a query happens in one pass: the pattern decides <em>which</em>
+files, the selectors decide <em>whether</em>, and the answer is already filtered by
+the time it reaches JavaScript.</p>
+<h2 id="anatomy-of-a-query">Anatomy of a query<a class="anchor" href="#anatomy-of-a-query" aria-label="Permalink to this section">#</a></h2>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/**/*.ts            !src/**/*.test.ts     :contains(&quot;export const&quot;)
+└──── pattern ────┘    └──── negation ────┘   └──── selector ────┘</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Part</th><th style="text-align:left">Prefix</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left">Pattern</td><td style="text-align:left">none</td><td style="text-align:left">A glob. A file must match at least one.</td></tr><tr><td style="text-align:left">Negation</td><td style="text-align:left"><code>!</code></td><td style="text-align:left">A glob. A file matching any negation is dropped.</td></tr><tr><td style="text-align:left">Selector</td><td style="text-align:left"><code>:</code></td><td style="text-align:left">A predicate. A file must satisfy every selector.</td></tr></tbody></table></div>
+<h3 id="tokenization">Tokenization<a class="anchor" href="#tokenization" aria-label="Permalink to this section">#</a></h3>
+<p>The query is split on whitespace, but the splitter is quote- and
+paren-aware: text inside <code>&quot;...&quot;</code>, <code>'...'</code> or <code>(...)</code> never splits a token.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// One token: 'src/**/*.ts', ':contains(&quot;export const&quot;)'
+hyperglobSync('src/**/*.ts :contains(&quot;export const&quot;)');</code></pre></div>
+<p>A quoted argument keeps its spaces:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(&quot;export const useServer&quot;)');</code></pre></div>
+<h3 id="several-queries">Several queries<a class="anchor" href="#several-queries" aria-label="Permalink to this section">#</a></h3>
+<p>Patterns, negations and selectors can also be passed as an array, where each
+element is an independent query. The results are merged: patterns are unioned,
+negations are unioned, and selectors are ANDed across the whole set.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync(['src/**/*.ts', '!src/**/*.test.ts']);</code></pre></div>
+<p>Both forms are equivalent for a single negation:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts !src/**/*.test.ts');   // same
+hyperglobSync(['src/**/*.ts', '!src/**/*.test.ts']); // same</code></pre></div>
+<hr />
+<h2 id="patterns">Patterns<a class="anchor" href="#patterns" aria-label="Permalink to this section">#</a></h2>
+<p>Patterns are compiled once into a <code>GlobSet</code> and matched as a set lookup, not a
+recursive string comparison. The usual glob syntax is supported:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Syntax</th><th style="text-align:left">Matches</th></tr></thead><tbody><tr><td style="text-align:left"><code>*</code></td><td style="text-align:left">Any run of characters within one path segment.</td></tr><tr><td style="text-align:left"><code>?</code></td><td style="text-align:left">Exactly one character within one path segment.</td></tr><tr><td style="text-align:left"><code>**</code></td><td style="text-align:left">Any number of path segments, including zero.</td></tr><tr><td style="text-align:left"><code>[abc]</code>, <code>[a-z]</code>, <code>[!abc]</code></td><td style="text-align:left">One character from a class.</td></tr><tr><td style="text-align:left"><code>{a,b}</code></td><td style="text-align:left">Any one of the alternatives (brace expansion).</td></tr><tr><td style="text-align:left"><code>\</code></td><td style="text-align:left">Escapes the next character.</td></tr></tbody></table></div>
+<p><code>*</code> never crosses a <code>/</code>. <code>**</code> does.</p>
+<h3 id="matches-zero-directories"><code>**</code> matches zero directories<a class="anchor" href="#matches-zero-directories" aria-label="Permalink to this section">#</a></h3>
+<p><code>src/**/*.ts</code> also matches <code>src/app.ts</code>, not just <code>src/deep/app.ts</code>. The
+<code>/**/</code> variants are compiled alongside the literal pattern so zero-directory
+matches are found.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts', { pathsOnly: true });
+// -&gt; ['src/app.ts', 'src/deep/nested.ts', ...]</code></pre></div>
+<p><code>src/**</code> is different: it matches the <em>contents</em> of <code>src</code>, and not <code>src</code>
+itself.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**', { pathsOnly: true, onlyFiles: false });
+// -&gt; ['src/app.ts', 'src/deep', 'src/deep/nested.ts']   (no 'src')</code></pre></div>
+<h3 id="brace-expansion">Brace expansion<a class="anchor" href="#brace-expansion" aria-label="Permalink to this section">#</a></h3>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.{ts,tsx}', { pathsOnly: true });
+// -&gt; ['src/app.ts', 'src/app.tsx', ...]</code></pre></div>
+<h3 id="a-magic-free-pattern-is-special">A magic-free pattern is special<a class="anchor" href="#a-magic-free-pattern-is-special" aria-label="Permalink to this section">#</a></h3>
+<p>A pattern with no glob magic (<code>*</code>, <code>?</code>, <code>{</code>, <code>[</code>) names exactly one path, and
+whether that path is a file or a directory changes what it matches.</p>
+<p><strong>Naming a directory</strong> (<code>src</code>) matches the directory <em>and</em> everything under
+it:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src', { pathsOnly: true, onlyFiles: false });
+// -&gt; ['src', 'src/app.ts', 'src/deep', 'src/deep/nested.ts']
+
+hyperglobSync('src', { pathsOnly: true, onlyFiles: true });
+// -&gt; ['src/app.ts', 'src/deep/nested.ts']</code></pre></div>
+<p><strong>Naming a file</strong> (<code>top.ts</code>) matches only that file:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('top.ts', { pathsOnly: true });
+// -&gt; ['top.ts']</code></pre></div>
+<h3 id="patterns-stay-inside-cwd">Patterns stay inside <code>cwd</code><a class="anchor" href="#patterns-stay-inside-cwd" aria-label="Permalink to this section">#</a></h3>
+<p>A pattern may not escape the working directory. <code>..</code> segments and absolute
+paths are rejected:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('../*.ts', { cwd: '/repo/app' });
+// Error: pattern escapes the working directory: ../*.ts</code></pre></div>
+<p>This is deliberate: a pattern that reaches outside <code>cwd</code> would return files the
+caller never asked for, in a region their ignore rules do not cover.</p>
+<h3 id="negations">Negations<a class="anchor" href="#negations" aria-label="Permalink to this section">#</a></h3>
+<p>A <code>!</code>-prefixed pattern removes matches. Negations apply after the positive
+patterns:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const entries = hyperglobSync(['src/**/*.ts', '!src/**/*.test.ts']);</code></pre></div>
+<p>A negation can also name a directory, which removes that directory and
+everything under it:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync(['**/*', '!src/generated']);</code></pre></div>
+<hr />
+<h2 id="selectors-1">Selectors<a class="anchor" href="#selectors-1" aria-label="Permalink to this section">#</a></h2>
+<p>Every selector in a query must pass — the semantics are AND. Selectors are
+evaluated <strong>in flight</strong>, during the traversal:</p>
+<ul><li>Metadata selectors (<code>:size</code>, <code>:modified</code>) are evaluated at <code>stat</code> time.</li><li>Content selectors (<code>:contains</code>, <code>:matches</code>, <code>:exports</code>, <code>:imports</code>,</li></ul>
+<p>  <code>:has-key</code>) read the file inside the traversal task and test it there.</p>
+<p>A file that fails is never returned and never costs another read.</p>
+<h3 id="containstext"><code>:contains(text)</code><a class="anchor" href="#containstext" aria-label="Permalink to this section">#</a></h3>
+<p>Literal byte-substring search over the whole file (memchr's <code>memmem</code>).</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(&quot;useServerHook&quot;)', { pathsOnly: true });
+// -&gt; ['src/app.ts', 'src/hooks/useServer.ts']</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Form</th><th style="text-align:left">Behavior</th></tr></thead><tbody><tr><td style="text-align:left"><code>:contains(&quot;text&quot;)</code></td><td style="text-align:left">Literal substring.</td></tr><tr><td style="text-align:left"><code>:contains('text')</code></td><td style="text-align:left">Same, single quotes.</td></tr><tr><td style="text-align:left"><code>:contains(/regex/)</code></td><td style="text-align:left">Regex search.</td></tr><tr><td style="text-align:left"><code>:contains(&quot;regex:...&quot;)</code></td><td style="text-align:left">Regex search, spelled with a prefix.</td></tr></tbody></table></div>
+<p>The argument is unquoted before matching, so <code>\&quot;</code> and <code>\'</code> inside a quoted
+argument become literal quote characters.</p>
+<p>An empty needle matches nothing.</p>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(&quot;export const&quot;)');</code></pre></div>
+<p><strong>Incorrect — the regex form needs slashes (or the <code>regex:</code> prefix); a plain
+word is a literal substring:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :contains(useServerHook)');   // literal — matches
+hyperglobSync('src/**/*.ts :contains(/use(Server|Client)Hook/)'); // regex
+hyperglobSync('src/**/*.ts :contains(use(Server|Client)Hook)');    // literal — NO match</code></pre></div>
+<h3 id="matchesregex"><code>:matches(regex)</code><a class="anchor" href="#matchesregex" aria-label="Permalink to this section">#</a></h3>
+<p>Regex byte search over the whole file. Identical to <code>:contains(/regex/)</code>;
+<code>:regex(...)</code> is accepted as an alias.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :matches(&quot;use(Server|Client)Hook&quot;)', { pathsOnly: true });</code></pre></div>
+<p><code>:matches</code> is a <em>text</em> search. It cannot tell an export from a comment — use
+<code>:exports</code> for that.</p>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :matches(&quot;export\\s+const&quot;)');</code></pre></div>
+<p><strong>Incorrect — a selector argument cannot contain unquoted whitespace, because
+the query tokenizer splits on it:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// This is two tokens: ':matches(export' and 'const)' — a parse error.
+hyperglobSync('src/**/*.ts :matches(export const)');</code></pre></div>
+<p>Quote the pattern (or use <code>\s</code> so there is no space to split on).</p>
+<h3 id="exportsname"><code>:exports(name)</code><a class="anchor" href="#exportsname" aria-label="Permalink to this section">#</a></h3>
+<p>A <strong>real AST check</strong> (the oxc parser), not a regex. The module must actually
+export that name, in any form:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :exports(&quot;useServerHook&quot;)', { pathsOnly: true });</code></pre></div>
+<p>All of these match <code>:exports(&quot;useServerHook&quot;)</code>:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">export const useServerHook = () =&gt; {};
+export function useServerHook() {}
+export class useServerHook {}
+export { useServerHook };
+export { impl as useServerHook };
+export { useServerHook } from './impl';
+export default function useServerHook() {}</code></pre></div>
+<p>A default export is exported under the name <code>default</code>:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :exports(&quot;default&quot;)');</code></pre></div>
+<p><strong>Export-shaped text inside a comment or a string does not match.</strong> This is
+the whole point of doing it in the AST:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// src/comment.ts
+// export const useServerHook = 1;      &lt;- NOT an export</code></pre></div>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// src/string.ts
+const s = &quot;export const useServerHook = 1&quot;;  &lt;- NOT an export</code></pre></div>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// src/block.ts
+/* export function useServerHook() {} */  &lt;- NOT an export</code></pre></div>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :exports(&quot;useServerHook&quot;)');</code></pre></div>
+<p><strong>Incorrect — a substring match on the source text:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// This would match comment.ts and string.ts too. Use :exports.
+hyperglobSync('src/**/*.ts :contains(&quot;export const useServerHook&quot;)');</code></pre></div>
+<h4 id="the-unparseable-file-fallback">The unparseable-file fallback<a class="anchor" href="#the-unparseable-file-fallback" aria-label="Permalink to this section">#</a></h4>
+<p>If a file cannot be parsed at all (a fatal syntax error, or a non-JS/TS
+extension), <code>:exports</code> falls back to a regex signature over a <em>masked</em> copy of
+the source in which comment and string-literal contents are blanked out. So a
+comment in a broken file still does not produce a false positive — but a
+genuine <code>export const ghost = 1;</code> in that file does still match.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// src/broken.ts  -- real export, but the file has a fatal syntax error
+export const ghost = 1;
+function broken( {</code></pre></div>
+<h3 id="importsname"><code>:imports(name)</code><a class="anchor" href="#importsname" aria-label="Permalink to this section">#</a></h3>
+<p>An AST check for module dependencies. The name matches an exact source <strong>or a
+subpath</strong> of it.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :imports(&quot;react&quot;)', { pathsOnly: true });</code></pre></div>
+<p>All of these count as importing <code>react</code>:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">import { useState } from 'react';
+import React from 'react';
+import 'react';                 // side-effect import
+import 'react/jsx-runtime';     // subpath
+const r = require('react');
+const p = import('react');       // dynamic import
+export { x } from 'react';      // re-export</code></pre></div>
+<p><strong>Import-shaped text inside a comment or a string does not count:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">// import { x } from 'react';    &lt;- not an import
+const s = &quot;import('react')&quot;;     &lt;- not an import</code></pre></div>
+<p><strong>A member access is not an import.</strong> <code>require</code> and <code>import</code> are contextual
+keywords — used as a property name they are just identifiers:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const o = { import: 1 };
+const p = o.import;      // &lt;- NOT an import
+const q = o?.import;     // &lt;- NOT an import</code></pre></div>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :imports(&quot;react&quot;)');</code></pre></div>
+<p><strong>Incorrect — the subpath only matches in the direction you wrote it:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :imports(&quot;react/jsx-runtime&quot;)');
+// matches files importing exactly that subpath, NOT every react import</code></pre></div>
+<h3 id="has-keypath"><code>:has-key(path)</code><a class="anchor" href="#has-keypath" aria-label="Permalink to this section">#</a></h3>
+<p>Evaluates a JSON document and checks that a dotted key path exists. Array
+indices work.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('pkg/**/*.json :has-key(&quot;dependencies.react&quot;)', { pathsOnly: true });
+// -&gt; ['pkg/app/package.json']</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Path</th><th style="text-align:left">Checks</th></tr></thead><tbody><tr><td style="text-align:left"><code>dependencies.react</code></td><td style="text-align:left"><code>obj.dependencies.react</code> exists.</td></tr><tr><td style="text-align:left"><code>scripts.build</code></td><td style="text-align:left">Nested objects.</td></tr><tr><td style="text-align:left"><code>list.0.name</code></td><td style="text-align:left">Index into an array.</td></tr></tbody></table></div>
+<p>The file must be valid JSON. A file that is not JSON never matches, and the
+selector is safe to apply to a mixed tree.</p>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('pkg/**/*.json :has-key(&quot;dependencies.react&quot;)');</code></pre></div>
+<p><strong>Incorrect — <code>:has-key</code> is a JSON structure check, not a text search:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('pkg/**/*.json :contains(&quot;react&quot;)');  // matches any text</code></pre></div>
+<h3 id="size"><code>:size(&lt;op&gt;&lt;value&gt;)</code><a class="anchor" href="#size" aria-label="Permalink to this section">#</a></h3>
+<p>Filters on file size, evaluated at the <code>stat</code> step.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/* :size(&lt;100kb)', { pathsOnly: true });</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Operator</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>&lt;</code></td><td style="text-align:left">Strictly less than.</td></tr><tr><td style="text-align:left"><code>&lt;=</code></td><td style="text-align:left">Less than or equal.</td></tr><tr><td style="text-align:left"><code>&gt;</code></td><td style="text-align:left">Strictly greater than.</td></tr><tr><td style="text-align:left"><code>&gt;=</code></td><td style="text-align:left">Greater than or equal.</td></tr><tr><td style="text-align:left"><code>=</code> / <code>==</code></td><td style="text-align:left">Equal to.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Unit</th><th style="text-align:left">Multiplier</th></tr></thead><tbody><tr><td style="text-align:left"><code>b</code></td><td style="text-align:left">1</td></tr><tr><td style="text-align:left"><code>kb</code>, <code>k</code></td><td style="text-align:left">1024</td></tr><tr><td style="text-align:left"><code>mb</code>, <code>m</code></td><td style="text-align:left">1024²</td></tr><tr><td style="text-align:left"><code>gb</code>, <code>g</code></td><td style="text-align:left">1024³</td></tr><tr><td style="text-align:left"><code>kib</code></td><td style="text-align:left">1024</td></tr><tr><td style="text-align:left"><code>mib</code></td><td style="text-align:left">1024²</td></tr><tr><td style="text-align:left"><code>gib</code></td><td style="text-align:left">1024³</td></tr><tr><td style="text-align:left"><em>(none)</em></td><td style="text-align:left">1 (raw bytes)</td></tr></tbody></table></div>
+<p>The unit is case-insensitive. <code>kb</code> and <code>kib</code> are the same multiplier; there
+are no decimal (1000-based) units.</p>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/* :size(&lt;100kb)');
+hyperglobSync('src/**/* :size(&lt;=1024)');</code></pre></div>
+<p><strong>Incorrect — the operator is mandatory:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/* :size(100kb)');
+// Error: selector comparison needs an operator (&lt;, &lt;=, &gt;, &gt;=, =): 100kb</code></pre></div>
+<h3 id="modified"><code>:modified(&lt;op&gt;&lt;date&gt;)</code><a class="anchor" href="#modified" aria-label="Permalink to this section">#</a></h3>
+<p>Filters on the filesystem mtime, in UTC.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :modified(&gt;2026-10-01)', { pathsOnly: true });</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Date form</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><code>YYYY-MM-DD</code></td><td style="text-align:left">Midnight UTC on that day.</td></tr><tr><td style="text-align:left"><code>YYYY-MM-DDTHH:MM:SS</code></td><td style="text-align:left">UTC, seconds precision.</td></tr><tr><td style="text-align:left"><code>YYYY-MM-DD HH:MM:SS</code></td><td style="text-align:left">Same, with a space.</td></tr><tr><td style="text-align:left"><code>...Z</code> suffix</td><td style="text-align:left">Accepted and ignored.</td></tr></tbody></table></div>
+<p>The same operators as <code>:size</code> apply: <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>=</code>.</p>
+<p><code>:mtime(...)</code> is accepted as an alias.</p>
+<p><strong>Correct:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :modified(&gt;2026-10-01)');
+hyperglobSync('src/**/*.ts :modified(&gt;=2026-10-01T12:30:00Z)');</code></pre></div>
+<p><strong>Incorrect — the operator is mandatory here too:</strong></p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src/**/*.ts :modified(2026-10-01)');
+// Error: selector comparison needs an operator (&lt;, &lt;=, &gt;, &gt;=, =): 2026-10-01</code></pre></div>
+<hr />
+<h2 id="selector-aliases">Selector aliases<a class="anchor" href="#selector-aliases" aria-label="Permalink to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Canonical</th><th style="text-align:left">Accepted aliases</th></tr></thead><tbody><tr><td style="text-align:left"><code>:contains</code></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><code>:matches</code></td><td style="text-align:left"><code>:regex</code></td></tr><tr><td style="text-align:left"><code>:exports</code></td><td style="text-align:left"><code>:export</code></td></tr><tr><td style="text-align:left"><code>:imports</code></td><td style="text-align:left"><code>:import</code></td></tr><tr><td style="text-align:left"><code>:has-key</code></td><td style="text-align:left"><code>:haskey</code>, <code>:hasKey</code></td></tr><tr><td style="text-align:left"><code>:size</code></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><code>:modified</code></td><td style="text-align:left"><code>:mtime</code></td></tr></tbody></table></div>
+<hr />
+<h2 id="composition">Composition<a class="anchor" href="#composition" aria-label="Permalink to this section">#</a></h2>
+<p>Selectors are ANDed, and they stack with patterns and negations freely:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync(
+  'src/**/*.ts :contains(&quot;export const&quot;) :modified(&gt;2026-10-01) :size(&lt;1kb)'
+);</code></pre></div>
+<p>That query means: *TypeScript files under <code>src</code>, changed since 1 October 2026,
+under 1 KB, that contain the literal text <code>export const</code>*. All four conditions
+must hold.</p>
+<p>Selectors also apply across an array of queries — they are ANDed globally:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync([
+  'src/**/*.ts',
+  '!src/**/*.test.ts',
+]); // no selectors here
+
+hyperglobSync([
+  'src/**/*.ts :size(&lt;10kb)',
+  '!src/vendor/**',
+]); // the :size applies to both patterns</code></pre></div>
+<hr />
+<h2 id="what-selectors-cannot-do">What selectors cannot do<a class="anchor" href="#what-selectors-cannot-do" aria-label="Permalink to this section">#</a></h2>
+<ul><li><strong>Directories never satisfy a content selector.</strong> <code>:contains</code>, <code>:matches</code>,</li></ul>
+<p>  <code>:exports</code>, <code>:imports</code> and <code>:has-key</code> only match files. A directory matched
+  during the walk is dropped when a content selector is present.</p>
+<ul><li><strong><code>:exports</code> and <code>:imports</code> are JS/TS concepts.</strong> For other extensions the</li></ul>
+<p>  AST is unavailable and the masked-regex fallback is used.</p>
+<ul><li><strong><code>:has-key</code> needs valid JSON.</strong> Anything else simply does not match.</li><li><strong><code>:size</code> and <code>:modified</code> need a <code>stat</code>.</strong> They are evaluated even when</li></ul>
+<p>  <code>stats: false</code>, because the selector needs the values; only the <em>reporting</em>
+  of <code>size</code> / <code>modified</code> on the entry is suppressed.</p>
+<h3 id="one-exception-the-walk-root">One exception: the walk root<a class="anchor" href="#one-exception-the-walk-root" aria-label="Permalink to this section">#</a></h3>
+<p>The directory a magic-free pattern names is the <em>walk root</em>, and the walk root
+is reported even when a content selector is present — it is evaluated before
+the walk starts, not during it:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('src :contains(&quot;export&quot;)', { pathsOnly: true, onlyFiles: false });
+// -&gt; ['src', 'src/a.ts']</code></pre></div>
+<p>Nested directories are not exempt: <code>src/** :contains(&quot;export&quot;)</code> reports the
+files but not <code>src/sub</code>.</p>
+<hr />
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Permalink to this section">#</a></h2>
+<p>A malformed selector throws at parse time, before any file is touched.</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Message</th><th style="text-align:left">Cause</th></tr></thead><tbody><tr><td style="text-align:left"><code>unknown selector :bogus</code></td><td style="text-align:left">No such selector.</td></tr><tr><td style="text-align:left"><code>selector needs closing ): :contains(&quot;x&quot;</code></td><td style="text-align:left">Unbalanced parentheses.</td></tr><tr><td style="text-align:left"><code>selector needs (...): :contains</code></td><td style="text-align:left">No parentheses at all.</td></tr><tr><td style="text-align:left"><code>empty name in :exports</code></td><td style="text-align:left"><code>:exports()</code>.</td></tr><tr><td style="text-align:left"><code>invalid key path in :has-key: a..b</code></td><td style="text-align:left">Empty segment in the dotted path.</td></tr><tr><td style="text-align:left"><code>selector comparison needs an operator (&lt;, &lt;=, &gt;, &gt;=, =): 100kb</code></td><td style="text-align:left">Missing operator.</td></tr><tr><td style="text-align:left"><code>invalid size value: abc</code></td><td style="text-align:left">Unparseable number.</td></tr><tr><td style="text-align:left"><code>invalid date: not-a-date</code></td><td style="text-align:left">Unparseable date.</td></tr><tr><td style="text-align:left"><code>bad regex in :contains: ...</code></td><td style="text-align:left">The regex did not compile.</td></tr><tr><td style="text-align:left"><code>query has no glob pattern: :contains(&quot;x&quot;)</code></td><td style="text-align:left">No pattern and no negation.</td></tr></tbody></table></div>
+<hr />
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="api.md">API</a> — the options that shape a scan.</li><li><a href="architecture.md">Architecture</a> — how in-flight evaluation works.</li></ul>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/selectors.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#anatomy-of-a-query">Anatomy of a query</a></li><li class="toc-l3"><a href="#tokenization">Tokenization</a></li><li class="toc-l3"><a href="#several-queries">Several queries</a></li><li class="toc-l2"><a href="#patterns">Patterns</a></li><li class="toc-l3"><a href="#matches-zero-directories">** matches zero directories</a></li><li class="toc-l3"><a href="#brace-expansion">Brace expansion</a></li><li class="toc-l3"><a href="#a-magic-free-pattern-is-special">A magic-free pattern is special</a></li><li class="toc-l3"><a href="#patterns-stay-inside-cwd">Patterns stay inside cwd</a></li><li class="toc-l3"><a href="#negations">Negations</a></li><li class="toc-l2"><a href="#selectors-1">Selectors</a></li><li class="toc-l3"><a href="#containstext">:contains(text)</a></li><li class="toc-l3"><a href="#matchesregex">:matches(regex)</a></li><li class="toc-l3"><a href="#exportsname">:exports(name)</a></li><li class="toc-l3"><a href="#importsname">:imports(name)</a></li><li class="toc-l3"><a href="#has-keypath">:has-key(path)</a></li><li class="toc-l3"><a href="#size">:size(&lt;op&gt;&lt;value&gt;)</a></li><li class="toc-l3"><a href="#modified">:modified(&lt;op&gt;&lt;date&gt;)</a></li><li class="toc-l2"><a href="#selector-aliases">Selector aliases</a></li><li class="toc-l2"><a href="#composition">Composition</a></li><li class="toc-l2"><a href="#what-selectors-cannot-do">What selectors cannot do</a></li><li class="toc-l3"><a href="#one-exception-the-walk-root">One exception: the walk root</a></li><li class="toc-l2"><a href="#errors">Errors</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

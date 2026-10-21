@@ -1,0 +1,102 @@
+name: CI
+
+# Runs on every push and pull request. The release workflow (release.yml) only
+# fires on version tags, so without this there is no automated gate before a
+# change is tagged and published.
+#
+# See docs/PACKAGING_AUDIT.md F6.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: cargo test
+        run: cargo test --locked --all-targets
+
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: version parity (package.json vs Cargo.toml)
+        run: node tools/check-version.mjs
+      - name: platform table drift check
+        run: node tools/check-platforms.mjs
+      - name: type-definition and ESM-wrapper parity
+        run: node tools/check-dts.mjs
+      - name: build the native module
+        run: npm run build
+      - name: node tests
+        # The MCP stdio tests spawn a subprocess, which requires test isolation
+        # to be disabled in restricted environments.
+        run: node --test --experimental-test-isolation=none "tests/*.test.js"
+      - name: verify the staged native binary
+        run: node tools/verify-native.mjs
+      - name: package sanity check
+        run: node tools/check-package.mjs
+      - name: documentation site is up to date
+        # The rendered HTML in docs/ is committed so GitHub Pages can serve
+        # it directly. This check guarantees it never drifts from the
+        # Markdown source.
+        run: node tools/build-site.mjs --check
+      - name: documentation agrees with the code
+        # The site's own tests (tests/site.test.js) cover rendering, links
+        # and anchors; this check covers the docs' claims about behaviour.
+        run: node tools/check-docs.mjs
+
+  package:
+    name: package (tarball smoke test)
+    runs-on: ubuntu-latest
+    needs: [node]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: pack
+        run: npm pack
+      - name: install the packed tarball into a scratch project
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/*.tgz --no-audit --no-fund
+          node -e "const h=require('@blazeinstall/hyperglob'); console.log('version:', h.version());"
+          npx hyperglob '**/*.json' | head -5

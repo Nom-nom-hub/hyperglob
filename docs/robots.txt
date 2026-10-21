@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nom-nom-hub.github.io/hyperglob/sitemap.xml

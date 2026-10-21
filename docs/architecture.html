@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture · hyperglob</title>
+<meta name="description" content="How hyperglob works: the Rust core, the parallel traversal, the ignore stack, in-flight selector evaluation, the N-API transports and the warm index." />
+<meta property="og:title" content="Architecture · hyperglob" />
+<meta property="og:description" content="How hyperglob works: the Rust core, the parallel traversal, the ignore stack, in-flight selector evaluation, the N-API transports and the warm index." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/architecture.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/architecture.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html">MCP</a><a href="architecture.html" class="active" aria-current="page">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>How hyperglob works: the Rust core, the parallel traversal, the ignore stack, in-flight selector evaluation, the N-API transports and the warm index.</p></blockquote>
+<h1 id="architecture">Architecture<a class="anchor" href="#architecture" aria-label="Permalink to this section">#</a></h1>
+<p>hyperglob is a Rust crate exposed to Node.js through N-API. The Rust side owns
+the traversal, the matching, the ignore rules and the selector evaluation;
+JavaScript only ever sees the results.</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">┌──────────────────────────────┐
+│      Node.js / TS Consumer   │
+└──────────────┬───────────────┘
+               │ N-API
+               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      hyperglob Crate                        │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌─────────────┐  │
+│  │ Pattern &amp;        │ │ Parallel         │ │ In-Flight   │  │
+│  │ Selector Parser  │ │ Directory Walker │ │ Selector    │  │
+│  │ - GlobSet match  │ │ - ignore crate   │ │ Engine      │  │
+│  │ - Selector exprs │ │ - .gitignore     │ │ - memchr    │  │
+│  │                  │ │   stack + rayon- │ │ - regex     │  │
+│  │                  │ │   style fan-out  │ │ - JSON walk │  │
+│  └──────────────────┘ └──────────────────┘ └─────────────┘  │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+                      OS File System</code></pre></div>
+<p>Source layout:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">File</th><th style="text-align:left">Responsibility</th></tr></thead><tbody><tr><td style="text-align:left"><code>src/lib.rs</code></td><td style="text-align:left">The N-API surface: <code>scanSync</code>, <code>scanPathsSync</code>, <code>scanColumnsSync</code>, <code>Scanner</code>, <code>PathsScanner</code>, <code>dependentsOfSync</code>, <code>parseQueryJson</code>.</td></tr><tr><td style="text-align:left"><code>src/engine.rs</code></td><td style="text-align:left">The traversal, the glob set, the ignore stack, per-entry evaluation.</td></tr><tr><td style="text-align:left"><code>src/selectors.rs</code></td><td style="text-align:left">The selector grammar, the oxc AST checks, the JSON key walk.</td></tr><tr><td style="text-align:left"><code>src/index.rs</code></td><td style="text-align:left">The warm index: snapshot build, validation, answering.</td></tr><tr><td style="text-align:left"><code>src/graph.rs</code></td><td style="text-align:left">The import graph behind <code>hyperglobDependents</code>.</td></tr><tr><td style="text-align:left"><code>index.js</code></td><td style="text-align:left">The public JS API: option normalization, validation, the columnar zip.</td></tr><tr><td style="text-align:left"><code>cli.js</code></td><td style="text-align:left">The CLI.</td></tr><tr><td style="text-align:left"><code>mcp.js</code></td><td style="text-align:left">The MCP server.</td></tr></tbody></table></div>
+<hr />
+<h2 id="query-parsing">Query parsing<a class="anchor" href="#query-parsing" aria-label="Permalink to this section">#</a></h2>
+<p>A query string is tokenized with quote- and paren-awareness, then split into
+three buckets: positive patterns, <code>!</code>-negations and selectors. Each selector
+is parsed once, up front, into a typed value — a literal byte needle, a
+compiled regex, an export name, an import name, a key path, or a comparison
+with its target already resolved.</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">enum Selector {
+    ContainsLiteral(Vec&lt;u8&gt;),
+    ContainsRegex(Regex),
+    Exports(String),
+    Imports(String),
+    HasKey(Vec&lt;String&gt;),
+    Size(CmpOp, u64),
+    Modified(CmpOp, i64),   // epoch ms, UTC
+}</code></pre></div>
+<p>Parse errors are raised before the walk starts, so a typo costs nothing.</p>
+<h3 id="compiled-matching">Compiled matching<a class="anchor" href="#compiled-matching" aria-label="Permalink to this section">#</a></h3>
+<p>All patterns — plus their <code>/**/</code> zero-directory variants — compile once into
+a <code>globset::GlobSet</code>. Per-file matching is a set lookup, not a recursive
+string comparison.</p>
+<p>A magic-free pattern that names a <em>directory</em> also gets a <code>&lt;dir&gt;/**</code> variant
+compiled in, which is how <code>hyperglob('src')</code> reports the directory and
+everything under it. A magic-free pattern that names a <em>file</em> matches just
+that file.</p>
+<hr />
+<h2 id="the-traversal">The traversal<a class="anchor" href="#the-traversal" aria-label="Permalink to this section">#</a></h2>
+<h3 id="a-custom-rayon-walk">A custom rayon walk<a class="anchor" href="#a-custom-rayon-walk" aria-label="Permalink to this section">#</a></h3>
+<p>The walker is a custom rayon work-stealing traversal over <code>std::fs::read_dir</code>.
+(v0.1.x used the <code>ignore</code> crate's walker; it measured roughly 3x slower than
+raw <code>readdir</code> on the benchmark VM. The <code>ignore</code> crate's <code>Gitignore</code> <em>matcher</em>
+still powers the ignore stack — it is the battle-tested part.)</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">scope.spawn(move |s| {
+    child.visit(s, path, child_rel, child_depth, child_stack, child_ancestors);
+});</code></pre></div>
+<p>Each directory is read once, and its entries are classified. In a directory
+with more than 512 entries the classification, matching and selector
+evaluation fan out across the rayon pool; smaller directories stay on the
+serial path, where the overhead of spawning would dominate.</p>
+<h3 id="narrowed-walk-roots">Narrowed walk roots<a class="anchor" href="#narrowed-walk-roots" aria-label="Permalink to this section">#</a></h3>
+<p>The walk root is the common ancestor of the <em>static prefixes</em> of the positive
+patterns. <code>src/**/*.ts</code> has the static prefix <code>src</code>, so the walk starts at
+<code>src/</code> and never touches the rest of the tree. The patterns' static prefix is
+also the base for <code>maxDepth</code> accounting, which is what makes hyperglob's depth
+semantics match fast-glob's <code>deep</code>.</p>
+<p>The walk root is itself a candidate: a pattern that names a directory (<code>src</code>)
+reports that directory. The root is only a candidate when it is exactly the
+path a pattern names, not when it is merely an ancestor of one.</p>
+<h3 id="depth">Depth<a class="anchor" href="#depth" aria-label="Permalink to this section">#</a></h3>
+<p>Depth is counted from the walk root, in path segments:</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">let can_descend = opts.max_depth.is_none_or(|md| child_depth &lt; md);</code></pre></div>
+<p>With <code>src/**/*.ts</code> and <code>maxDepth: 2</code>, files in <code>src/</code> and <code>src/a/</code> match.</p>
+<h3 id="symlinks-and-cycles">Symlinks and cycles<a class="anchor" href="#symlinks-and-cycles" aria-label="Permalink to this section">#</a></h3>
+<p>Symlinked directories are not descended into by default. With
+<code>followSymlinks: true</code>, each directory is identified by its canonicalized
+path (plus the device/inode pair on Unix), and the walker keeps the chain of
+strict ancestors. A link that resolves to one of its own ancestors stops the
+descent, so a cycle terminates instead of looping forever.</p>
+<h3 id="containment">Containment<a class="anchor" href="#containment" aria-label="Permalink to this section">#</a></h3>
+<p>A pattern may not escape the working directory. The static prefix is
+normalized, and a <code>..</code> that pops past the root — or an absolute path — is
+rejected:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">pattern escapes the working directory: ../*.ts</code></pre></div>
+<p>This is checked once, before the walk, and every offending pattern is listed.</p>
+<hr />
+<h2 id="the-ignore-stack">The ignore stack<a class="anchor" href="#the-ignore-stack" aria-label="Permalink to this section">#</a></h2>
+<p>Ignore rules come from the <code>ignore</code> crate — the engine behind ripgrep — and
+are applied as a <strong>per-directory stack</strong>:</p>
+<ul><li>When a directory is entered, its <code>.gitignore</code>, <code>.ignore</code> and <code>.agentignore</code></li></ul>
+<p>  are loaded and pushed onto the stack.</p>
+<ul><li>The cwd's <code>.git/info/exclude</code> and the global gitignore are added at the</li></ul>
+<p>  root.</p>
+<ul><li>Deeper matchers win: the stack is consulted from the top down, and the</li></ul>
+<p>  first ignore match wins, unless a nearer matcher whitelists the path.</p>
+<ul><li>An ignored directory prunes its whole subtree — which is what git itself</li></ul>
+<p>  does.</p>
+<p>The global gitignore is built once per process (a <code>OnceLock</code>), because
+building it re-reads git config files on every scan otherwise.</p>
+<p><code>gitignore: false</code> disables the git layer; <code>ignoreFiles: false</code> disables just
+the <code>.ignore</code> / <code>.agentignore</code> layer.</p>
+<hr />
+<h2 id="in-flight-selector-evaluation">In-flight selector evaluation<a class="anchor" href="#in-flight-selector-evaluation" aria-label="Permalink to this section">#</a></h2>
+<p>The point of the whole design: a file is filtered <strong>before</strong> it ever crosses
+the N-API boundary.</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">let want_metadata = self.has_meta_selectors || (!light &amp;&amp; self.stats_requested);</code></pre></div>
+<ul><li><strong>Metadata selectors</strong> (<code>:size</code>, <code>:modified</code>) evaluate at the <code>stat</code> step.</li><li><strong>Content selectors</strong> (<code>:contains</code>, <code>:matches</code>, <code>:exports</code>, <code>:imports</code>,</li></ul>
+<p>  <code>:has-key</code>) read the file and test it <em>inside the traversal task</em>.</p>
+<ul><li>A file is only <code>stat</code>-ed when stats were requested or a metadata selector</li></ul>
+<p>  needs the values. With <code>stats: false</code> and no metadata selector, a large
+  tree costs zero <code>stat</code> calls.</p>
+<ul><li>A file that fails any selector is dropped immediately.</li></ul>
+<p>One <code>FileContext</code> is built per file and <strong>memoizes the AST parse</strong>, so a
+query carrying both <code>:exports</code> and <code>:imports</code> parses each file at most once.</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">let mut ctx = FileContext::new(&amp;bytes, &amp;ext);
+for sel in &amp;self.query.selectors {
+    if sel.needs_content() &amp;&amp; !sel.eval_with(&amp;mut ctx) {
+        return None;
+    }
+}</code></pre></div>
+<h3 id="the-ast-checks">The AST checks<a class="anchor" href="#the-ast-checks" aria-label="Permalink to this section">#</a></h3>
+<p><code>:exports</code> and <code>:imports</code> are real AST checks, using the <strong>oxc</strong> parser.</p>
+<p>Exported names are collected from the AST: function, class and variable
+declarations, TS interfaces, type aliases, enums, <code>import =</code> and namespace
+declarations, <code>export { a as b }</code> specifiers, re-export specifiers, and
+<code>default</code> for default exports.</p>
+<p>Import sources are collected from the AST <em>and</em> from oxc's token stream.
+Working at the token level is what makes it exact: comments are lexed as
+trivia and never appear in the token stream, and a string literal is a single
+<code>Str</code> token rather than a sequence of source characters. A file that merely
+<em>mentions</em> <code>require('react')</code> inside a comment or a string is correctly
+reported as not importing react.</p>
+<p><code>require</code> and <code>import</code> are contextual keywords, so the token scan also checks
+that the token is not preceded by <code>.</code> or <code>?.</code> — <code>obj.import(...)</code> is a member
+access, not an import.</p>
+<p>When a file cannot be parsed at all (a fatal syntax error, or a non-JS/TS
+extension), both checks fall back to a regex over a <strong>masked</strong> copy of the
+source in which comment and string-literal contents are blanked out. Export-
+or import-shaped text that only lives inside a comment or a string still
+cannot produce a false positive.</p>
+<hr />
+<h2 id="the-n-api-transports">The N-API transports<a class="anchor" href="#the-n-api-transports" aria-label="Permalink to this section">#</a></h2>
+<p>Two different shapes, because the two APIs have different needs.</p>
+<h3 id="columnar-sync-transport">Columnar sync transport<a class="anchor" href="#columnar-sync-transport" aria-label="Permalink to this section">#</a></h3>
+<p><code>hyperglobSync</code> moves fields across the boundary as <strong>parallel columns</strong>
+rather than as one object per match:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Column</th><th style="text-align:left">Encoding</th></tr></thead><tbody><tr><td style="text-align:left"><code>paths</code>, <code>relativePaths</code>, <code>names</code>, <code>extensions</code></td><td style="text-align:left">NUL-joined mega-strings.</td></tr><tr><td style="text-align:left"><code>numbers</code></td><td style="text-align:left">A <code>Buffer</code> of little-endian <code>f64</code> pairs: <code>[size, modifiedMs]</code> per entry.</td></tr><tr><td style="text-align:left"><code>flags</code></td><td style="text-align:left">A <code>Buffer</code> of bit flags per entry: bit 0 = <code>isFile</code>, bit 1 = <code>isDir</code>.</td></tr><tr><td style="text-align:left"><code>contents</code></td><td style="text-align:left">An array of strings, with a parallel <code>hasContent</code> flag buffer.</td></tr></tbody></table></div>
+<p>NUL cannot appear in a filesystem path, which is what makes the joined-string
+trick safe. The numeric column is a <code>Buffer</code> rather than a <code>Vec&lt;u8&gt;</code> on
+purpose: napi-rs marshals a <code>Vec&lt;u8&gt;</code> as a JS array of individual numbers,
+which is catastrophically slow at scale.</p>
+<p>The JS side zips the columns into <code>Entry</code> objects in a tight loop, reading
+the numeric column through a <code>Float64Array</code> view:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const nums = new Float64Array(numBuf.buffer, numBuf.byteOffset, n * 2);
+entry.size = nums[i * 2];
+entry.modifiedMs = nums[i * 2 + 1];</code></pre></div>
+<p><code>modified</code> and <code>buffer</code> are <strong>lazy prototype getters</strong>, built on first
+access, so 10k+ <code>Date</code> / <code>Buffer</code> objects are never created unless touched.
+They are not own enumerable properties, so <code>Object.keys(entry)</code> does not list
+them.</p>
+<h3 id="streaming-batches">Streaming batches<a class="anchor" href="#streaming-batches" aria-label="Permalink to this section">#</a></h3>
+<p>For the async API the walker runs on a background Rust thread and feeds a
+crossbeam channel in batches. JavaScript pulls batches with
+<code>Scanner::next_batch(256)</code>:</p>
+<div class="code-block" data-lang="rust"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-rust">pub fn next_batch(&amp;self, max: Option&lt;u32&gt;) -&gt; NativeBatch</code></pre></div>
+<p>Results are allocated on the Rust side and cross the boundary in small
+chunks instead of one giant array. <code>done: true</code> means the traversal has
+finished and the channel is drained.</p>
+<p>There is a second, paths-only scanner (<code>createPathsScanner</code>) whose batch
+carries a single NUL-joined string. It exists so that <code>pathsOnly</code> streaming
+is genuinely incremental — the earlier implementation ran a full
+<code>scanPathsSync</code> and split the result, which meant the entire result set was
+materialized in memory before the first <code>yield</code>, the opposite of what a
+streaming API promises.</p>
+<p>The JS <code>HyperglobStream</code> pulls batches of 256 and yields them one at a time,
+yielding to the event loop when a batch comes back empty so a long scan never
+blocks the process.</p>
+<hr />
+<h2 id="the-warm-index">The warm index<a class="anchor" href="#the-warm-index" aria-label="Permalink to this section">#</a></h2>
+<p><code>index: true</code> maintains a persistent snapshot of the tree at
+<code>&lt;cwd&gt;/.hyperglob/index.json</code>.</p>
+<h3 id="what-the-snapshot-records">What the snapshot records<a class="anchor" href="#what-the-snapshot-records" aria-label="Permalink to this section">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Record</th><th style="text-align:left">Contents</th></tr></thead><tbody><tr><td style="text-align:left">Entries</td><td style="text-align:left">Every non-ignored path, with <code>is_file</code>, size and mtime.</td></tr><tr><td style="text-align:left">Dirs</td><td style="text-align:left">Every visited directory and its mtime.</td></tr><tr><td style="text-align:left">Ignore files</td><td style="text-align:left">A fingerprint (size + mtime) of every <code>.gitignore</code> / <code>.ignore</code> / <code>.agentignore</code> / <code>.git/info/exclude</code>, plus the global gitignore's standard XDG location.</td></tr><tr><td style="text-align:left">Fingerprint</td><td style="text-align:left">A short string encoding <code>gitignore</code>, <code>ignoreFiles</code>, <code>dot</code> and <code>followSymlinks</code>.</td></tr></tbody></table></div>
+<h3 id="on-disk-format">On-disk format<a class="anchor" href="#on-disk-format" aria-label="Permalink to this section">#</a></h3>
+<p>The snapshot is columnar, like the N-API transport: a JSON header line,
+then a NUL-joined paths blob, then a flag byte per entry, then 16 bytes per
+entry of little-endian <code>f64</code> (size, mtime). Parsing a 110k-entry JSON
+snapshot cost tens of ms per query; splitting a joined blob costs about 2 ms.</p>
+<p>The file is written to <code>index.json.tmp</code> and renamed into place, so a partial
+write can never be read as a valid snapshot.</p>
+<h3 id="validation">Validation<a class="anchor" href="#validation" aria-label="Permalink to this section">#</a></h3>
+<p>Creating, deleting or renaming anything bumps its parent directory's mtime,
+so a fully-matching validation means the tree <em>structure</em> is unchanged and
+<code>pathsOnly</code> answers are exact.</p>
+<p>File <em>content</em> edits do not bump directory mtimes. For entry and
+metadata-selector queries the matched candidates are re-<code>stat</code>ed, and content
+selectors always read fresh bytes — so metadata answers stay exact too. The
+cost is proportional to the match set, not to the tree.</p>
+<p>Any validation failure — a changed directory mtime, a changed ignore file, a
+different option fingerprint, a corrupt file, a version mismatch — rebuilds
+the snapshot with a full scan and answers the current query from the fresh
+snapshot.</p>
+<p>Known edge: filesystems with coarse (1-second) mtime granularity can miss a
+structural change made inside the same second as the snapshot build.</p>
+<h3 id="the-index-never-leaks">The index never leaks<a class="anchor" href="#the-index-never-leaks" aria-label="Permalink to this section">#</a></h3>
+<p><code>.hyperglob/</code> and <code>.hyperglob/**</code> are excluded from results
+<strong>unconditionally</strong> — not only when <code>index: true</code>. Otherwise the answer would
+depend on whether the cache happened to be warm, and the cache's own
+<code>index.json</code> would appear in one scan and not the other. A live scan and a
+warm-index scan of the same tree always return the same set.</p>
+<hr />
+<h2 id="the-import-graph">The import graph<a class="anchor" href="#the-import-graph" aria-label="Permalink to this section">#</a></h2>
+<p><code>hyperglobDependents(target)</code> builds the relative-import graph over all JS/TS
+files under <code>cwd</code> in one parallel AST pass, then walks it backwards from the
+target.</p>
+<p>Resolution covers:</p>
+<ul><li>Relative specifiers, with the TS ESM convention that <code>./b.js</code> on disk is</li></ul>
+<p>  often <code>./b.ts</code>.</p>
+<ul><li><code>index.*</code> files: <code>./hooks</code> resolves to <code>./hooks/index.ts</code>.</li><li>Bare monorepo specifiers (<code>shared/ReactSymbols</code>) via path-suffix matching,</li></ul>
+<p>  with the longest shared directory prefix breaking ties, then the shortest
+  path.</p>
+<p>The answer is every file that imports the target directly or transitively —
+the &quot;what breaks if I change this file&quot; set. On the real React repo,
+dependents of <code>packages/shared/ReactSymbols.js</code> = <strong>831 files in ~285 ms</strong>.</p>
+<hr />
+<h2 id="benchmarks">Benchmarks<a class="anchor" href="#benchmarks" aria-label="Permalink to this section">#</a></h2>
+<p>Measured, not targeted. Reproduce with <code>npm run bench</code>. Methodology: synthetic
+trees (22k and 110k files), 2 warmups, then 7 <strong>interleaved</strong> rounds per
+head-to-head (engines alternate running order so transient load hits both),
+reporting median and min. The numbers below are from a noisy shared 2-core
+Linux VM with an overlay filesystem — absolute values will be far better on
+real hardware; the <em>ratios</em> are the point.</p>
+<p><strong>22k-file tree, <code>src/**/*.ts</code> (13,336 matches), medians:</strong></p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Scenario</th><th style="text-align:left">hyperglob</th><th style="text-align:left">fast-glob</th><th style="text-align:left"></th></tr></thead><tbody><tr><td style="text-align:left"><code>pathsOnly</code> vs paths</td><td style="text-align:left"><strong>33.9 ms</strong></td><td style="text-align:left">52.1 ms</td><td style="text-align:left"></td></tr><tr><td style="text-align:left">entries + stats (like-for-like)</td><td style="text-align:left"><strong>103.9 ms</strong></td><td style="text-align:left">345.5 ms</td><td style="text-align:left"></td></tr><tr><td style="text-align:left">entries, <code>stats: false</code></td><td style="text-align:left">50.8 ms</td><td style="text-align:left">(paths: 52.1 ms)</td><td style="text-align:left"></td></tr><tr><td style="text-align:left">Full scan <code>**/*.ts</code> w/ gitignore, <code>pathsOnly</code></td><td style="text-align:left"><strong>33.4 ms</strong></td><td style="text-align:left">52.4 ms (manual ignore list)</td><td style="text-align:left"></td></tr><tr><td style="text-align:left">Path + content <code>:contains</code> vs glob + <code>readFile</code> + <code>includes</code></td><td style="text-align:left"><strong>253.9 ms</strong></td><td style="text-align:left">3,296.6 ms</td><td style="text-align:left"><strong>13x</strong></td></tr></tbody></table></div>
+<p><strong>110k-file tree, <code>src/**/*.ts</code> (66,668 matches), medians:</strong></p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Scenario</th><th style="text-align:left">hyperglob</th><th style="text-align:left">fast-glob</th><th style="text-align:left"></th></tr></thead><tbody><tr><td style="text-align:left"><code>pathsOnly</code> vs paths</td><td style="text-align:left"><strong>237.4 ms</strong></td><td style="text-align:left">324.9 ms</td><td style="text-align:left"></td></tr><tr><td style="text-align:left">entries + stats</td><td style="text-align:left"><strong>451.5 ms</strong></td><td style="text-align:left">1,263.0 ms</td><td style="text-align:left"></td></tr><tr><td style="text-align:left"><code>:contains</code> single pass vs glob + read</td><td style="text-align:left"><strong>1,266.1 ms</strong></td><td style="text-align:left">15,518.3 ms</td><td style="text-align:left"><strong>12x</strong></td></tr></tbody></table></div>
+<p>Against the classic <code>glob</code> package (v13) it is not close either: 28.9 ms vs
+138.1 ms (async) / 69.2 ms (sync) on <code>src/**/*.ts</code>, and 41.0 ms vs 718.3 ms
+on the full scan with an ignore list — measured with the same interleaved
+method.</p>
+<p>hyperglob wins every head-to-head above on both median and min, including the
+plain-path rows that v0.1.x lost. The fixes were:</p>
+<ul><li>a <strong>custom rayon traversal</strong> (the <code>ignore</code> crate's walker was the</li></ul>
+<p>  bottleneck; its gitignore <em>matcher</em> is still used for rules),</p>
+<ul><li>a <strong>columnar N-API transport</strong> (one NUL-joined string for paths,</li></ul>
+<p>  byte-packed numeric columns — per-object marshaling and <code>Vec&lt;u8&gt;</code>-as-array
+  marshaling were both measured disasters),</p>
+<ul><li>and <strong>never stat-ing files whose stats nobody asked for</strong>.</li></ul>
+<p>The PRD's aspirational targets (&lt;45 ms cold crawl at 100k files) are still
+not met on this hardware by hyperglob <em>or</em> the incumbents — treat them as
+datacenter-hardware goals.</p>
+<h3 id="warm-index-numbers">Warm index numbers<a class="anchor" href="#warm-index-numbers" aria-label="Permalink to this section">#</a></h3>
+<p>At 110k files, a warm <code>pathsOnly</code> query measured <strong>39 ms vs 83 ms</strong> for a full
+walk, and warm entries+stats ~<strong>322 vs 452 ms</strong>.</p>
+<hr />
+<h2 id="see-also">See also<a class="anchor" href="#see-also" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="api.md">API</a> — the public surface.</li><li><a href="selectors.md">Selectors</a> — the query language.</li><li><a href="cli.md">CLI</a> and <a href="mcp.md">MCP</a> — the same engine from a shell and from an</li></ul>
+<p>  agent.</p>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#query-parsing">Query parsing</a></li><li class="toc-l3"><a href="#compiled-matching">Compiled matching</a></li><li class="toc-l2"><a href="#the-traversal">The traversal</a></li><li class="toc-l3"><a href="#a-custom-rayon-walk">A custom rayon walk</a></li><li class="toc-l3"><a href="#narrowed-walk-roots">Narrowed walk roots</a></li><li class="toc-l3"><a href="#depth">Depth</a></li><li class="toc-l3"><a href="#symlinks-and-cycles">Symlinks and cycles</a></li><li class="toc-l3"><a href="#containment">Containment</a></li><li class="toc-l2"><a href="#the-ignore-stack">The ignore stack</a></li><li class="toc-l2"><a href="#in-flight-selector-evaluation">In-flight selector evaluation</a></li><li class="toc-l3"><a href="#the-ast-checks">The AST checks</a></li><li class="toc-l2"><a href="#the-n-api-transports">The N-API transports</a></li><li class="toc-l3"><a href="#columnar-sync-transport">Columnar sync transport</a></li><li class="toc-l3"><a href="#streaming-batches">Streaming batches</a></li><li class="toc-l2"><a href="#the-warm-index">The warm index</a></li><li class="toc-l3"><a href="#what-the-snapshot-records">What the snapshot records</a></li><li class="toc-l3"><a href="#on-disk-format">On-disk format</a></li><li class="toc-l3"><a href="#validation">Validation</a></li><li class="toc-l3"><a href="#the-index-never-leaks">The index never leaks</a></li><li class="toc-l2"><a href="#the-import-graph">The import graph</a></li><li class="toc-l2"><a href="#benchmarks">Benchmarks</a></li><li class="toc-l3"><a href="#warm-index-numbers">Warm index numbers</a></li><li class="toc-l2"><a href="#see-also">See also</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

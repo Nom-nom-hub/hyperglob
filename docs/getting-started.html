@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Getting started · hyperglob</title>
+<meta name="description" content="Install hyperglob, run your first query, and pick the right surface for the job." />
+<meta property="og:title" content="Getting started · hyperglob" />
+<meta property="og:description" content="Install hyperglob, run your first query, and pick the right surface for the job." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://nom-nom-hub.github.io/hyperglob/getting-started.html" />
+<link rel="canonical" href="https://nom-nom-hub.github.io/hyperglob/getting-started.html" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">**</span>
+      <span class="brand-name">hyperglob</span>
+    </a>
+    <nav class="site-nav" aria-label="Documentation">
+      <a href="getting-started.html" class="active" aria-current="page">Getting started</a><a href="api.html">API</a><a href="selectors.html">Selectors</a><a href="cli.html">CLI</a><a href="mcp.html">MCP</a><a href="architecture.html">Architecture</a>
+    </nav>
+    <div class="header-tools">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Toggle colour theme">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
+      <a class="gh-link" href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer" aria-label="hyperglob on GitHub">
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc-layout wrap">
+  <article class="doc-content">
+<blockquote><p>Install hyperglob, run your first query, and pick the right surface for the job.</p></blockquote>
+<h1 id="getting-started">Getting started<a class="anchor" href="#getting-started" aria-label="Permalink to this section">#</a></h1>
+<p>hyperglob is a multi-threaded, AST-aware file discovery engine. It replaces the
+<code>glob</code> + <code>readFile</code> + parse pipeline that most agent tooling runs today with a
+single traversal that filters on path, content, metadata and real AST structure
+while it walks.</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/**/*.ts :contains(&quot;export const&quot;) :modified(&gt;2026-10-01) :size(&lt;100kb)</code></pre></div>
+<h2 id="install">Install<a class="anchor" href="#install" aria-label="Permalink to this section">#</a></h2>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">npm install @blazeinstall/hyperglob</code></pre></div>
+<p>The <code>postinstall</code> script downloads the prebuilt native binary for your platform
+(Linux x64/arm64 glibc and musl, macOS x64/arm64, Windows x64) and verifies it
+against the published <code>checksums.txt</code>. A source build is also available if you
+need a custom target:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">npm run build     # cargo build --release + stage the .node file</code></pre></div>
+<p>Node 18+ is required.</p>
+<h2 id="first-query">First query<a class="anchor" href="#first-query" aria-label="Permalink to this section">#</a></h2>
+<p>The fastest useful thing you can do is find files by path and content at once:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const { hyperglobSync } = require('@blazeinstall/hyperglob');
+
+const entries = hyperglobSync('src/**/*.ts :contains(&quot;useServerHook&quot;)', {
+  cwd: process.cwd(),
+});
+
+for (const entry of entries) {
+  console.log(entry.relativePath, entry.size, entry.modified);
+}</code></pre></div>
+<p>Two things just happened in one pass. The glob matched <code>src/**/*.ts</code>, and the
+file was read and searched for <code>useServerHook</code> <em>inside the traversal</em>, before
+the entry ever crossed the N-API boundary. There is no second <code>readFile</code> pass.</p>
+<p>If you only need paths, ask for them:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const paths = hyperglobSync('src/**/*.ts', { pathsOnly: true });
+// -&gt; ['src/app.ts', 'src/hooks/useServer.ts', ...]</code></pre></div>
+<h2 id="the-three-surfaces">The three surfaces<a class="anchor" href="#the-three-surfaces" aria-label="Permalink to this section">#</a></h2>
+<p>hyperglob is one engine with three front ends. Same query language, same
+semantics, same results.</p>
+<h3 id="node-api">Node API<a class="anchor" href="#node-api" aria-label="Permalink to this section">#</a></h3>
+<p>Use it when the code is yours — a build script, a dev tool, a test helper.</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">const { hyperglob, hyperglobSync, hyperglobDependents } = require('@blazeinstall/hyperglob');
+
+// Streaming: pull entries as the walk produces them.
+for await (const entry of hyperglob('src/**/*.ts')) {
+  console.log(entry.path);
+}
+
+// Batch: everything at once.
+const entries = hyperglobSync(['src/**/*.ts', '!src/**/*.test.ts']);
+
+// Blast radius: who imports this file, directly or transitively?
+const dependents = hyperglobDependents('src/hooks.ts', { cwd: process.cwd() });</code></pre></div>
+<p>The streaming API is genuinely incremental — the first entry is available
+before the walk has finished, and abandoning the loop early stops the work.
+Full reference: <a href="api.md">API</a>.</p>
+<h3 id="cli">CLI<a class="anchor" href="#cli" aria-label="Permalink to this section">#</a></h3>
+<p>Use it from a shell, a CI step, or an agent that shells out.</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">npx hyperglob 'src/**/*.ts :exports(&quot;useServerHook&quot;)'
+npx hyperglob 'src/**/*.ts' --json --paths-only
+npx hyperglob --dependents src/hooks.ts</code></pre></div>
+<p>Exit codes are an agent-friendly contract: <code>0</code> success, <code>1</code> runtime error,
+<code>2</code> usage error. Full reference: <a href="cli.md">CLI</a>.</p>
+<h3 id="mcp">MCP<a class="anchor" href="#mcp" aria-label="Permalink to this section">#</a></h3>
+<p>Use it when an agent should drive discovery without writing any code. The
+server speaks JSON-RPC 2.0 over stdio and exposes three tools:
+<code>hyperglob_query</code>, <code>hyperglob_paths</code> and <code>hyperglob_dependents</code>.</p>
+<div class="code-block" data-lang="json"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;hyperglob&quot;: { &quot;command&quot;: &quot;node&quot;, &quot;args&quot;: [&quot;/path/to/hyperglob/mcp.js&quot;] }
+  }
+}</code></pre></div>
+<p>Auto-registration into agent configs is <strong>opt-in</strong> and off by default:</p>
+<div class="code-block" data-lang="bash"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-bash">HYPERGLOB_REGISTER_MCP=1 npm install</code></pre></div>
+<p>Full reference: <a href="mcp.md">MCP</a>.</p>
+<h2 id="core-concepts">Core concepts<a class="anchor" href="#core-concepts" aria-label="Permalink to this section">#</a></h2>
+<h3 id="queries-are-one-string">Queries are one string<a class="anchor" href="#queries-are-one-string" aria-label="Permalink to this section">#</a></h3>
+<p>A query is a glob pattern followed by zero or more selectors, all separated by
+spaces:</p>
+<div class="code-block" data-lang="text"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-text">src/**/*.ts :contains(&quot;useServerHook&quot;) :size(&lt;100kb)</code></pre></div>
+<p>The query is tokenized with quote- and paren-awareness, so
+<code>:contains(&quot;export const&quot;)</code> is one token, not two. Patterns, negations and
+selectors can also be passed as an array of separate strings, which is how you
+express a negation that spans several tokens.</p>
+<h3 id="selectors-are-anded">Selectors are ANDed<a class="anchor" href="#selectors-are-anded" aria-label="Permalink to this section">#</a></h3>
+<p>Every selector in a query must pass. Selectors stack with plain patterns and
+<code>!</code> negations, and they are evaluated in flight — a file that fails
+<code>:contains</code> is dropped inside the traversal, so it is never marshalled and
+never returned.</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Selector</th><th style="text-align:left">Question it answers</th></tr></thead><tbody><tr><td style="text-align:left"><code>:contains(&quot;text&quot;)</code></td><td style="text-align:left">Does the file contain this literal?</td></tr><tr><td style="text-align:left"><code>:matches(&quot;regex&quot;)</code></td><td style="text-align:left">Does the file match this regex?</td></tr><tr><td style="text-align:left"><code>:exports(&quot;name&quot;)</code></td><td style="text-align:left">Does the module really export this name?</td></tr><tr><td style="text-align:left"><code>:imports(&quot;name&quot;)</code></td><td style="text-align:left">Does the module depend on this package?</td></tr><tr><td style="text-align:left"><code>:has-key(&quot;a.b.c&quot;)</code></td><td style="text-align:left">Does this JSON have that key path?</td></tr><tr><td style="text-align:left"><code>:size(&lt;100kb)</code></td><td style="text-align:left">Is the file smaller than 100 KB?</td></tr><tr><td style="text-align:left"><code>:modified(&gt;2026-10-01)</code></td><td style="text-align:left">Was the file modified after that date?</td></tr></tbody></table></div>
+<p>Details, semantics and traps: <a href="selectors.md">Selectors</a>.</p>
+<h3 id="the-ignore-stack-is-native">The ignore stack is native<a class="anchor" href="#the-ignore-stack-is-native" aria-label="Permalink to this section">#</a></h3>
+<p><code>.gitignore</code>, <code>.ignore</code>, <code>.agentignore</code>, <code>.git/info/exclude</code> and the global
+gitignore are obeyed as the walk descends — no manual exclusion lists, no
+<code>ignore</code> option pointing at <code>node_modules</code>. An ignored directory prunes its
+whole subtree, which is what git itself does.</p>
+<p>Turn the git layer off with <code>gitignore: false</code>, or just the <code>.ignore</code> /
+<code>.agentignore</code> layer with <code>ignoreFiles: false</code>.</p>
+<h3 id="patterns-stay-inside-the-working-directory">Patterns stay inside the working directory<a class="anchor" href="#patterns-stay-inside-the-working-directory" aria-label="Permalink to this section">#</a></h3>
+<p>A pattern that reaches above <code>cwd</code> is rejected rather than silently followed:</p>
+<div class="code-block" data-lang="js"><button class="copy-btn" type="button" data-copy aria-label="Copy code to clipboard">Copy</button><pre><code class="language-js">hyperglobSync('../*.ts', { cwd: '/repo/app' });
+// Error: pattern escapes the working directory: ../*.ts</code></pre></div>
+<h2 id="when-to-use-what">When to use what<a class="anchor" href="#when-to-use-what" aria-label="Permalink to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Situation</th><th style="text-align:left">Reach for</th></tr></thead><tbody><tr><td style="text-align:left">Find files by path only</td><td style="text-align:left"><code>hyperglobSync(..., { pathsOnly: true })</code> — the fastest mode.</td></tr><tr><td style="text-align:left">Find files by path <em>and</em> content</td><td style="text-align:left"><code>hyperglobSync('**/*.ts :contains(&quot;x&quot;)')</code> — one pass, no read-back.</td></tr><tr><td style="text-align:left">Find a module by its real exports</td><td style="text-align:left"><code>:exports(&quot;name&quot;)</code> — a real AST check, not a regex.</td></tr><tr><td style="text-align:left">Assess the blast radius of an edit</td><td style="text-align:left"><code>hyperglobDependents('src/hooks.ts')</code>.</td></tr><tr><td style="text-align:left">Consume results as they arrive</td><td style="text-align:left"><code>for await (const e of hyperglob(...))</code>.</td></tr><tr><td style="text-align:left">Run the same query repeatedly</td><td style="text-align:left"><code>index: true</code> — the warm index snapshot.</td></tr><tr><td style="text-align:left">Let an agent drive discovery</td><td style="text-align:left">The <a href="mcp.md">MCP server</a>.</td></tr><tr><td style="text-align:left">Script it in a shell</td><td style="text-align:left">The <a href="cli.md">CLI</a>.</td></tr></tbody></table></div>
+<h2 id="the-warm-index">The warm index<a class="anchor" href="#the-warm-index" aria-label="Permalink to this section">#</a></h2>
+<p>Passing <code>index: true</code> maintains a snapshot of the tree at
+<code>&lt;cwd&gt;/.hyperglob/index.json</code>. Repeat queries validate the snapshot by
+stat-ing directories and ignore files, then answer from memory. Creating,
+deleting or renaming a file bumps its parent directory's mtime, so a
+validated path answer is exact; matched entries are re-stat'ed and content
+selectors always read fresh bytes, so metadata answers stay exact too.</p>
+<p>At 110k files a warm <code>pathsOnly</code> query measured <strong>39 ms vs 83 ms</strong> for a full
+walk, and warm entries+stats ~<strong>322 vs 452 ms</strong>.</p>
+<p>The index directory is never included in results, so a live scan and a
+warm-index scan of the same tree always return the same set.</p>
+<h2 id="whats-next">What's next<a class="anchor" href="#whats-next" aria-label="Permalink to this section">#</a></h2>
+<ul><li><a href="api.md">API reference</a> — every export, every option, the <code>Entry</code> shape.</li><li><a href="selectors.md">Selector reference</a> — the query language in full.</li><li><a href="cli.md">CLI reference</a> — every flag and exit code.</li><li><a href="mcp.md">MCP reference</a> — tool schemas and response shapes.</li><li><a href="architecture.md">Architecture</a> — how the Rust core, traversal, ignore stack</li></ul>
+<p>  and transports work.</p>
+    <footer class="doc-footer">
+      <p>
+        Found a mistake? <a href="https://github.com/Nom-nom-hub/hyperglob/edit/main/docs/getting-started.md" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>.
+      </p>
+    </footer>
+  </article>
+  <nav class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li class="toc-l2"><a href="#install">Install</a></li><li class="toc-l2"><a href="#first-query">First query</a></li><li class="toc-l2"><a href="#the-three-surfaces">The three surfaces</a></li><li class="toc-l3"><a href="#node-api">Node API</a></li><li class="toc-l3"><a href="#cli">CLI</a></li><li class="toc-l3"><a href="#mcp">MCP</a></li><li class="toc-l2"><a href="#core-concepts">Core concepts</a></li><li class="toc-l3"><a href="#queries-are-one-string">Queries are one string</a></li><li class="toc-l3"><a href="#selectors-are-anded">Selectors are ANDed</a></li><li class="toc-l3"><a href="#the-ignore-stack-is-native">The ignore stack is native</a></li><li class="toc-l3"><a href="#patterns-stay-inside-the-working-directory">Patterns stay inside the working directory</a></li><li class="toc-l2"><a href="#when-to-use-what">When to use what</a></li><li class="toc-l2"><a href="#the-warm-index">The warm index</a></li><li class="toc-l2"><a href="#whats-next">What's next</a></li></ul></nav>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>hyperglob — a multi-threaded, AST-aware, zero-copy file discovery engine.</p>
+    <p class="footer-links">
+      <a href="https://github.com/Nom-nom-hub/hyperglob" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.npmjs.com/package/@blazeinstall/hyperglob" target="_blank" rel="noopener noreferrer">npm</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Nom-nom-hub/hyperglob/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <span aria-hidden="true">·</span>
+      <span class="footer-copy">MIT License · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

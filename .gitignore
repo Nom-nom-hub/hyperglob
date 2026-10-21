@@ -4,3 +4,18 @@ node_modules/
 Cargo.lock.orig
 .DS_Store
 .bench-tmp/
+
+# The warm index cache.
+.hyperglob/
+
+# Local agent-tooling scratch. The MCP auto-registration writes a
+# "hyperglob" entry into these; they are per-developer state, not project
+# files, and must never be committed.
+.mcp.json
+crush.json
+.cursor/
+.factory/
+.kiro/
+.roo/
+.vscode/
+.scripts/
