@@ -41,13 +41,61 @@ const cargo = fs.existsSync(path.join(cargoHome, 'cargo'))
   ? path.join(cargoHome, 'cargo')
   : 'cargo';
 
-const args = ['build', '--lib'];
+// Environment for the cargo invocation.
+//
+// Musl targets build with cargo-zigbuild, not plain cargo, for two
+// verified reasons (v1.0.7 release run, reproduced locally 2026-11-10):
+//
+// 1. Musl targets default to a static CRT, and rustc silently drops the
+//    cdylib crate type for statically-linked targets — warning only, exit
+//    code 0 — so cargo finishes and no .so exists. -crt-static forces a
+//    dynamic CRT so the cdylib is emitted. (cargo-zigbuild alone does not
+//    fix this; the flag is still required.)
+// 2. Ubuntu's musl-gcc cannot link the result at all: ld can't find
+//    libgcc_s (rustc links -lgcc_s explicitly and musl-gcc's specs don't
+//    put the host gcc lib dir on the search path), and every -L workaround
+//    either still fails or silently produces a glibc-linked .so wearing a
+//    -musl name. zig brings its own musl libc. The resulting .so records
+//    NEEDED "libc.so", which musl's loader resolves to itself — verified
+//    against the real Alpine 3.22 loader (ld-musl-x86_64.so.1 --list).
+//    The release workflow installs zig + cargo-zigbuild on musl jobs.
+const env = { ...process.env, HYPERGLOB_VERSION: version };
+const isMusl = triple && triple.endsWith('-musl');
+if (isMusl) {
+  const flag = '-C target-feature=-crt-static';
+  env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${flag}` : flag;
+}
+
+// cargo-zigbuild is invoked as `cargo-zigbuild zigbuild <cargo build args>`
+// (`zigbuild` itself is the build command — no `build` after it) and lives
+// next to cargo in ~/.cargo/bin.
+const zigbuild = fs.existsSync(path.join(cargoHome, 'cargo-zigbuild'))
+  ? path.join(cargoHome, 'cargo-zigbuild')
+  : 'cargo-zigbuild';
+if (isMusl) {
+  // Fail loudly with instructions instead of a bare ENOENT when the musl
+  // toolchain is missing. The release workflow installs both (see
+  // .github/workflows/release.yml); locally: zig 0.17.1 on PATH plus
+  // `cargo install cargo-zigbuild`.
+  for (const [bin, args, hint] of [
+    ['zig', ['version'], 'install zig 0.17.1 (https://ziglang.org/download/) and put it on PATH'],
+    [zigbuild, ['--version'], 'install it with `cargo install cargo-zigbuild`'],
+  ]) {
+    try {
+      execFileSync(bin, args, { stdio: 'ignore' });
+    } catch {
+      throw new Error(`musl build needs ${bin}, which was not found: ${hint}.`);
+    }
+  }
+}
+const builder = isMusl ? zigbuild : cargo;
+const args = isMusl ? ['zigbuild', '--lib'] : ['build', '--lib'];
 if (!debug) args.push('--release');
 if (triple) args.push('--target', triple);
-execFileSync(cargo, args, {
+execFileSync(builder, args, {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, HYPERGLOB_VERSION: version },
+  env,
 });
 
 // cargo triple -> release-matrix target name.
